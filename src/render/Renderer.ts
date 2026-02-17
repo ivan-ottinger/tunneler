@@ -4,6 +4,7 @@ import {
   STATUS_PANEL_WIDTH, CANVAS_WIDTH, CANVAS_HEIGHT,
   TILE_COLORS, PLAYER_COLORS, PLAYER_DARK_COLORS, TANK_SIZE,
   CGA_PALETTE, BASE_SIZE, BASE_ENTRANCE_WIDTH, BASE_CAMP_TIMEOUT,
+  RESPAWN_TICKS,
 } from '../constants.js';
 import { calculateViewport } from './ViewportCalculator.js';
 import { drawStatusPanel } from './StatusPanel.js';
@@ -294,12 +295,14 @@ export class Renderer {
       // Draw effects (muzzle flash)
       drawEffects(ctx, this.effects, vp.scrollX, vp.scrollY, viewX);
 
-      // Static interference
+      // Static interference — ramps to full static when dead
       const player = state.players[p];
+      const deadTicks = !player.alive ? (RESPAWN_TICKS - player.respawnTimer) : 0;
       drawStaticInterference(
         ctx, player.energy,
         viewX, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
         state.tickCount,
+        deadTicks,
       );
     }
 

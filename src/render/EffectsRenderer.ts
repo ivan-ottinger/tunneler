@@ -9,42 +9,80 @@ export function drawStaticInterference(
   viewX: number, viewY: number,
   viewW: number, viewH: number,
   tickCount: number,
+  deadTicks = 0,
 ): void {
   const threshold = MAX_ENERGY * 0.2;
-  if (energy >= threshold) return;
+  if (deadTicks <= 0 && energy >= threshold) return;
 
-  const intensity = 1 - (energy / threshold); // 0..1, higher = worse
+  // Let explosion play for 12 ticks, then full static instantly
+  const STATIC_DELAY = 12;
+  const deadIntensity = deadTicks > STATIC_DELAY ? 1.0 : 0;
+  const energyIntensity = energy < threshold ? 1 - (energy / threshold) : 0;
+  const intensity = Math.max(deadIntensity, energyIntensity);
   const rng = createRng(tickCount * 7919);
 
-  // Horizontal scan line distortion — rolling bands of noise
+  // When dead and past delay: fill every pixel with random noise
+  if (deadIntensity > 0) {
+    // Black out viewport first, then draw noise on top
+    ctx.fillStyle = CGA_PALETTE[0];
+    ctx.fillRect(viewX, viewY, viewW, viewH);
+
+    for (let y = 0; y < viewH; y++) {
+      for (let x = 0; x < viewW; x++) {
+        // At low deadIntensity, skip some pixels to let explosion show through
+        if (rng() > deadIntensity) continue;
+
+        const brightness = rng();
+        if (brightness > 0.7) {
+          ctx.fillStyle = CGA_PALETTE[15]; // white
+        } else if (brightness > 0.4) {
+          ctx.fillStyle = CGA_PALETTE[7];  // light gray
+        } else if (brightness > 0.15) {
+          ctx.fillStyle = CGA_PALETTE[8];  // dark gray
+        } else {
+          ctx.fillStyle = CGA_PALETTE[0];  // black
+        }
+        ctx.fillRect(viewX + x, viewY + y, 1, 1);
+      }
+    }
+
+    // Rolling horizontal bars for extra TV static feel
+    const barCount = 6;
+    for (let b = 0; b < barCount; b++) {
+      const barY = ((tickCount * (2 + b)) + b * 17) % viewH;
+      const barH = 2 + Math.floor(rng() * 3);
+      ctx.fillStyle = `rgba(255, 255, 255, ${deadIntensity * 0.2})`;
+      ctx.fillRect(viewX, viewY + barY, viewW, barH);
+    }
+    return;
+  }
+
+  // Low-energy static: sparse scan line noise
   const bandHeight = 3 + Math.floor(rng() * 5);
-  const bandOffset = (tickCount * 3) % viewH; // rolls down the screen
+  const bandOffset = (tickCount * 3) % viewH;
 
   for (let y = 0; y < viewH; y++) {
-    // Distance from rolling band center determines local intensity
     const distFromBand = Math.abs(((y + bandOffset) % viewH) - viewH / 2);
     const bandFactor = distFromBand < bandHeight ? 1.0 : 0.0;
     const rowIntensity = intensity * 0.4 + bandFactor * intensity * 0.6;
 
     if (rng() > rowIntensity) continue;
 
-    // Full-width scan line noise
     for (let x = 0; x < viewW; x++) {
       if (rng() > rowIntensity * 0.7) continue;
 
       const brightness = rng();
       if (brightness > 0.7) {
-        ctx.fillStyle = CGA_PALETTE[15]; // white
+        ctx.fillStyle = CGA_PALETTE[15];
       } else if (brightness > 0.4) {
-        ctx.fillStyle = CGA_PALETTE[7];  // light gray
+        ctx.fillStyle = CGA_PALETTE[7];
       } else {
-        ctx.fillStyle = CGA_PALETTE[8];  // dark gray
+        ctx.fillStyle = CGA_PALETTE[8];
       }
       ctx.fillRect(viewX + x, viewY + y, 1, 1);
     }
   }
 
-  // At very low energy, add thick horizontal bars that roll across
   if (intensity > 0.5) {
     const barCount = Math.floor(intensity * 4);
     for (let b = 0; b < barCount; b++) {
