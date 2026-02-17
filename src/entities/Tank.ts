@@ -1,0 +1,212 @@
+import { Direction, GameState, Player, PlayerInput, TileType } from '../types.js';
+import {
+  DIR_DELTA, TANK_SIZE, MOVE_ENERGY_COST, MOVE_EMPTY_ENERGY_COST, IDLE_ENERGY_COST,
+  MAX_ENERGY, MAX_SHIELD,
+  BASE_SIZE, BASE_ENERGY_REGEN, BASE_SHIELD_REGEN,
+  ENEMY_BASE_ENERGY_REGEN,
+  DIG_COOLDOWN_TICKS, DIG_COOLDOWN_FIRING,
+  EXPLOSION_PARTICLE_COUNT,
+  EXPLOSION_PARTICLE_SPEED_MIN, EXPLOSION_PARTICLE_SPEED_MAX,
+  EXPLOSION_PARTICLE_LIFE_MIN, EXPLOSION_PARTICLE_LIFE_MAX,
+} from '../constants.js';
+import { digRect, containsBlocking, markDirtyRect } from '../map/TerrainModifier.js';
+import { rectsOverlap } from '../engine/CollisionDetector.js';
+import { SoundManager } from '../engine/SoundManager.js';
+
+export function updateTank(
+  state: GameState,
+  playerIndex: number,
+  input: PlayerInput,
+  sound: SoundManager,
+): void {
+  const player = state.players[playerIndex];
+
+  if (!player.alive) {
+    handleRespawn(state, playerIndex);
+    return;
+  }
+
+  handleMovement(state, player, input, playerIndex, sound);
+  handleRefueling(state, player, playerIndex);
+  handleIdleDrain(state, player, playerIndex, sound);
+}
+
+function handleMovement(
+  state: GameState,
+  player: Player,
+  input: PlayerInput,
+  playerIndex: number,
+  sound: SoundManager,
+): void {
+  // Tick down dig cooldown
+  if (player.digCooldown > 0) {
+    player.digCooldown--;
+  }
+
+  if (input.direction === Direction.None) return;
+
+  // If direction differs from current, turn first (no movement)
+  if (player.direction !== input.direction) {
+    player.direction = input.direction;
+    return;
+  }
+
+  // Move in current direction
+  const [dx, dy] = DIR_DELTA[player.direction];
+  const newX = player.x + dx;
+  const newY = player.y + dy;
+
+  // Bounds check
+  if (newX < 0 || newX + TANK_SIZE > state.mapWidth ||
+      newY < 0 || newY + TANK_SIZE > state.mapHeight) {
+    return;
+  }
+
+  // Rock/BaseWall collision check
+  if (containsBlocking(state.map, state.mapWidth, newX, newY, TANK_SIZE, TANK_SIZE)) {
+    return;
+  }
+
+  // Check for dirt — dig through it
+  let hasDirt = false;
+  for (let ty = 0; ty < TANK_SIZE; ty++) {
+    for (let tx = 0; tx < TANK_SIZE; tx++) {
+      const idx = (newY + ty) * state.mapWidth + (newX + tx);
+      const tile = state.map[idx];
+      if (tile === TileType.Dirt || tile === TileType.DirtVariant) {
+        hasDirt = true;
+        break;
+      }
+    }
+    if (hasDirt) break;
+  }
+
+  if (hasDirt) {
+    // Apply dig cooldown — slower digging, but faster while firing
+    if (player.digCooldown > 0) return;
+    const cooldown = input.fire ? DIG_COOLDOWN_FIRING : DIG_COOLDOWN_TICKS;
+    player.digCooldown = cooldown;
+
+    // Mark old position dirty before digging
+    markDirtyRect(state.dirtyTiles, state.mapWidth, player.x, player.y, TANK_SIZE, TANK_SIZE);
+    digRect(state.map, state.mapWidth, newX, newY, TANK_SIZE, TANK_SIZE);
+    markDirtyRect(state.dirtyTiles, state.mapWidth, newX, newY, TANK_SIZE, TANK_SIZE);
+  } else {
+    // Mark old position dirty
+    markDirtyRect(state.dirtyTiles, state.mapWidth, player.x, player.y, TANK_SIZE, TANK_SIZE);
+  }
+
+  player.x = newX;
+  player.y = newY;
+  player.energy -= hasDirt ? MOVE_ENERGY_COST : MOVE_EMPTY_ENERGY_COST;
+
+  // Self-destruct if energy depleted — opponent gets the kill
+  if (player.energy <= 0) {
+    state.players[1 - playerIndex].score++;
+    destroyTank(state, player, sound);
+  }
+}
+
+function handleRefueling(
+  state: GameState,
+  player: Player,
+  playerIndex: number,
+): void {
+  for (let p = 0; p < 2; p++) {
+    const base = state.players[p].base;
+    const isOwnBase = p === playerIndex;
+
+    // Check overlap with base interior (inside the walls)
+    if (rectsOverlap(
+      player.x, player.y, TANK_SIZE, TANK_SIZE,
+      base.x + 1, base.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
+    )) {
+      if (isOwnBase) {
+        player.energy = Math.min(MAX_ENERGY, player.energy + BASE_ENERGY_REGEN);
+        player.shield = Math.min(MAX_SHIELD, player.shield + BASE_SHIELD_REGEN);
+      } else {
+        player.energy = Math.min(MAX_ENERGY, player.energy + ENEMY_BASE_ENERGY_REGEN);
+      }
+    }
+  }
+}
+
+function handleIdleDrain(
+  state: GameState,
+  player: Player,
+  playerIndex: number,
+  sound: SoundManager,
+): void {
+  // Slowly drain energy when outside own base
+  const base = state.players[playerIndex].base;
+  const inOwnBase = rectsOverlap(
+    player.x, player.y, TANK_SIZE, TANK_SIZE,
+    base.x + 1, base.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
+  );
+  if (!inOwnBase) {
+    player.energy -= IDLE_ENERGY_COST;
+    if (player.energy <= 0) {
+      state.players[1 - playerIndex].score++;
+      destroyTank(state, player, sound);
+    }
+  }
+}
+
+function handleRespawn(state: GameState, playerIndex: number): void {
+  const player = state.players[playerIndex];
+  player.respawnTimer--;
+  if (player.respawnTimer <= 0) {
+    respawnTank(player);
+  }
+}
+
+export function destroyTank(state: GameState, player: Player, sound?: SoundManager): void {
+  player.alive = false;
+  player.respawnTimer = 30;
+  player.bullets = [];
+  if (sound) sound.playExplosion();
+
+  const cx = player.x + Math.floor(TANK_SIZE / 2);
+  const cy = player.y + Math.floor(TANK_SIZE / 2);
+
+  // Clear the immediate tank area
+  digRect(state.map, state.mapWidth, player.x - 2, player.y - 2, TANK_SIZE + 4, TANK_SIZE + 4);
+  markDirtyRect(state.dirtyTiles, state.mapWidth, player.x - 2, player.y - 2, TANK_SIZE + 4, TANK_SIZE + 4);
+
+  // Tank shatters into shrapnel — random angles, random speeds
+  const colors = [14, 14, 12, 12, 15, 6]; // yellow, red, white, brown
+  const speedRange = EXPLOSION_PARTICLE_SPEED_MAX - EXPLOSION_PARTICLE_SPEED_MIN;
+  const lifeRange = EXPLOSION_PARTICLE_LIFE_MAX - EXPLOSION_PARTICLE_LIFE_MIN;
+
+  for (let i = 0; i < EXPLOSION_PARTICLE_COUNT; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = EXPLOSION_PARTICLE_SPEED_MIN + Math.random() * speedRange;
+    const life = EXPLOSION_PARTICLE_LIFE_MIN + Math.floor(Math.random() * lifeRange);
+
+    // Spawn slightly offset from center for more organic look
+    const spawnOffset = Math.random() * 2;
+    const spawnAngle = Math.random() * Math.PI * 2;
+
+    state.particles.push({
+      x: cx + Math.cos(spawnAngle) * spawnOffset,
+      y: cy + Math.sin(spawnAngle) * spawnOffset,
+      dx: Math.cos(angle) * speed,
+      dy: Math.sin(angle) * speed,
+      life,
+      color: colors[Math.floor(Math.random() * colors.length)],
+    });
+  }
+}
+
+function respawnTank(player: Player): void {
+  const base = player.base;
+  player.x = base.x + Math.floor(BASE_SIZE / 2) - Math.floor(TANK_SIZE / 2);
+  player.y = base.y + Math.floor(BASE_SIZE / 2) - Math.floor(TANK_SIZE / 2);
+  player.energy = MAX_ENERGY;
+  player.shield = MAX_SHIELD;
+  player.alive = true;
+  player.direction = Direction.Up;
+  player.reloadTimer = 0;
+  player.digCooldown = 0;
+  player.bullets = [];
+}
