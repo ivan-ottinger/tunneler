@@ -57,6 +57,7 @@ export interface Player {
   respawnTimer: number;
   reloadTimer: number;
   digCooldown: number;
+  baseCampTicks: number; // continuous ticks spent inside own base
   bullets: Bullet[];
   base: Base;
 }

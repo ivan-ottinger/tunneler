@@ -42,6 +42,7 @@ export const FIRE_ENERGY_COST = 5;
 export const BASE_ENERGY_REGEN = 5;
 export const BASE_SHIELD_REGEN = 0.2;
 export const ENEMY_BASE_ENERGY_REGEN = 3;
+export const BASE_CAMP_TIMEOUT = 50; // ticks (~5 seconds) before regen stops
 
 // Bullets
 export const MAX_BULLETS = 10;

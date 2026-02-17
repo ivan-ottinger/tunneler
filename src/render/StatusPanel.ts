@@ -2,7 +2,7 @@ import { GameState, RenderContext } from '../types.js';
 import {
   CGA_PALETTE, MAX_ENERGY, MAX_SHIELD,
   VIEWPORT_WIDTH, STATUS_PANEL_WIDTH, VIEWPORT_HEIGHT,
-  KILLS_TO_WIN, PLAYER_COLORS,
+  KILLS_TO_WIN, PLAYER_COLORS, BASE_CAMP_TIMEOUT,
 } from '../constants.js';
 import { drawBitmapText, drawBitmapTextCentered } from './BitmapFont.js';
 
@@ -66,11 +66,14 @@ export function drawStatusPanel(
       ctx.fillRect(barX + s * (tickW + 1), scoreY, tickW, 2);
     }
 
-    // Energy label + bar
+    // Energy label + bar — flash when base regen exhausted
     const energyLabelY = scoreY + 5;
-    drawBitmapText(ctx, 'E', barX, energyLabelY, CGA_PALETTE[3], 1);
+    const regenDead = player.baseCampTicks > BASE_CAMP_TIMEOUT;
+    const flash = regenDead && (state.tickCount % 6 < 3);
+    const eColor = flash ? CGA_PALETTE[12] : CGA_PALETTE[3];
+    drawBitmapText(ctx, 'E', barX, energyLabelY, eColor, 1);
     drawBar(ctx, barX + 5, energyLabelY, barW - 5,
-      player.energy, MAX_ENERGY, CGA_PALETTE[3], CGA_PALETTE[7]);
+      player.energy, MAX_ENERGY, eColor, CGA_PALETTE[7]);
 
     // Health label + bar (same style as energy)
     const healthLabelY = energyLabelY + 8;

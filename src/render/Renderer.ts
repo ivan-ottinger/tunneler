@@ -3,7 +3,7 @@ import {
   RENDER_SCALE, VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
   STATUS_PANEL_WIDTH, CANVAS_WIDTH, CANVAS_HEIGHT,
   TILE_COLORS, PLAYER_COLORS, PLAYER_DARK_COLORS, TANK_SIZE,
-  CGA_PALETTE, BASE_SIZE, BASE_ENTRANCE_WIDTH,
+  CGA_PALETTE, BASE_SIZE, BASE_ENTRANCE_WIDTH, BASE_CAMP_TIMEOUT,
 } from '../constants.js';
 import { calculateViewport } from './ViewportCalculator.js';
 import { drawStatusPanel } from './StatusPanel.js';
@@ -204,6 +204,32 @@ export class Renderer {
         vp.scrollX, vp.scrollY, VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
         viewX, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
       );
+
+      // Dim base walls if player is camping (regen exhausted)
+      for (let t = 0; t < 2; t++) {
+        const owner = state.players[t];
+        if (owner.baseCampTicks <= BASE_CAMP_TIMEOUT) continue;
+        const base = owner.base;
+        const entrOff = Math.floor((BASE_SIZE - BASE_ENTRANCE_WIDTH) / 2);
+        ctx.fillStyle = CGA_PALETTE[8]; // dim to dark gray
+        for (let dy = 0; dy < BASE_SIZE; dy++) {
+          for (let dx = 0; dx < BASE_SIZE; dx++) {
+            const isEdge = dx === 0 || dx === BASE_SIZE - 1 || dy === 0 || dy === BASE_SIZE - 1;
+            if (!isEdge) continue;
+            const isTopBot = dy === 0 || dy === BASE_SIZE - 1;
+            const isLR = dx === 0 || dx === BASE_SIZE - 1;
+            let isEntr = false;
+            if (isTopBot && dx >= entrOff && dx < entrOff + BASE_ENTRANCE_WIDTH) isEntr = true;
+            if (isLR && dy >= entrOff && dy < entrOff + BASE_ENTRANCE_WIDTH) isEntr = true;
+            if (isEntr) continue;
+            const wx = (base.x + dx) - vp.scrollX + viewX;
+            const wy = (base.y + dy) - vp.scrollY;
+            if (wx >= viewX && wx < viewX + VIEWPORT_WIDTH && wy >= 0 && wy < VIEWPORT_HEIGHT) {
+              ctx.fillRect(wx, wy, 1, 1);
+            }
+          }
+        }
+      }
 
       // Draw tanks
       for (let t = 0; t < 2; t++) {

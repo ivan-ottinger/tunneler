@@ -3,7 +3,7 @@ import {
   DIR_DELTA, TANK_SIZE, MOVE_ENERGY_COST, MOVE_EMPTY_ENERGY_COST, IDLE_ENERGY_COST,
   MAX_ENERGY, MAX_SHIELD,
   BASE_SIZE, BASE_ENERGY_REGEN, BASE_SHIELD_REGEN,
-  ENEMY_BASE_ENERGY_REGEN,
+  ENEMY_BASE_ENERGY_REGEN, BASE_CAMP_TIMEOUT,
   DIG_COOLDOWN_TICKS, DIG_COOLDOWN_FIRING,
   EXPLOSION_PARTICLE_COUNT,
   EXPLOSION_PARTICLE_SPEED_MIN, EXPLOSION_PARTICLE_SPEED_MAX,
@@ -112,22 +112,34 @@ function handleRefueling(
   player: Player,
   playerIndex: number,
 ): void {
-  for (let p = 0; p < 2; p++) {
-    const base = state.players[p].base;
-    const isOwnBase = p === playerIndex;
+  const ownBase = state.players[playerIndex].base;
+  const inOwnBase = rectsOverlap(
+    player.x, player.y, TANK_SIZE, TANK_SIZE,
+    ownBase.x + 1, ownBase.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
+  );
 
-    // Check overlap with base interior (inside the walls)
-    if (rectsOverlap(
-      player.x, player.y, TANK_SIZE, TANK_SIZE,
-      base.x + 1, base.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
-    )) {
-      if (isOwnBase) {
-        player.energy = Math.min(MAX_ENERGY, player.energy + BASE_ENERGY_REGEN);
-        player.shield = Math.min(MAX_SHIELD, player.shield + BASE_SHIELD_REGEN);
-      } else {
-        player.energy = Math.min(MAX_ENERGY, player.energy + ENEMY_BASE_ENERGY_REGEN);
-      }
+  if (inOwnBase) {
+    const fullyCharged = player.energy >= MAX_ENERGY && player.shield >= MAX_SHIELD;
+    // Only start camp timer once fully recharged
+    if (fullyCharged) {
+      player.baseCampTicks++;
     }
+    // Regen until camp timeout
+    if (player.baseCampTicks <= BASE_CAMP_TIMEOUT) {
+      player.energy = Math.min(MAX_ENERGY, player.energy + BASE_ENERGY_REGEN);
+      player.shield = Math.min(MAX_SHIELD, player.shield + BASE_SHIELD_REGEN);
+    }
+  } else {
+    player.baseCampTicks = 0;
+  }
+
+  // Enemy base always regens energy (no camp penalty)
+  const enemyBase = state.players[1 - playerIndex].base;
+  if (rectsOverlap(
+    player.x, player.y, TANK_SIZE, TANK_SIZE,
+    enemyBase.x + 1, enemyBase.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
+  )) {
+    player.energy = Math.min(MAX_ENERGY, player.energy + ENEMY_BASE_ENERGY_REGEN);
   }
 }
 
@@ -208,5 +220,6 @@ function respawnTank(player: Player): void {
   player.direction = Direction.Up;
   player.reloadTimer = 0;
   player.digCooldown = 0;
+  player.baseCampTicks = 0;
   player.bullets = [];
 }

@@ -79,6 +79,7 @@ export class Game {
       respawnTimer: 0,
       reloadTimer: 0,
       digCooldown: 0,
+      baseCampTicks: 0,
       bullets: [],
       base: { x: 0, y: 0, owner: index },
     };
