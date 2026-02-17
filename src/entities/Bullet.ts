@@ -108,9 +108,9 @@ export function updateBullets(state: GameState, renderer: Renderer, sound: Sound
           break;
         }
 
-        // Hit opponent tank
+        // Hit opponent tank (skip if invulnerable)
         const opponent = state.players[1 - p];
-        if (opponent.alive && rectsOverlap(
+        if (opponent.alive && opponent.invulnTicks <= 0 && rectsOverlap(
           bullet.x, bullet.y, 1, 1,
           opponent.x, opponent.y, TANK_SIZE, TANK_SIZE,
         )) {

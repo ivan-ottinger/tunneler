@@ -58,6 +58,7 @@ export interface Player {
   reloadTimer: number;
   digCooldown: number;
   baseCampTicks: number; // continuous ticks spent inside own base
+  invulnTicks: number; // ticks of invulnerability remaining after respawn
   bullets: Bullet[];
   base: Base;
 }

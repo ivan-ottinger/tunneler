@@ -231,7 +231,7 @@ export class Renderer {
         }
       }
 
-      // Draw tanks
+      // Draw tanks (pulsate if invulnerable)
       for (let t = 0; t < 2; t++) {
         const tank = state.players[t];
         if (!tank.alive) continue;
@@ -243,6 +243,12 @@ export class Renderer {
         if (sx + TANK_SIZE < viewX || sx >= viewX + VIEWPORT_WIDTH) continue;
         if (sy + TANK_SIZE < 0 || sy >= VIEWPORT_HEIGHT) continue;
 
+        // Invulnerability pulse: smoothly cycle opacity using a sine wave
+        let invulnAlpha = 1;
+        if (tank.invulnTicks > 0) {
+          invulnAlpha = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(state.tickCount * 0.8));
+        }
+
         const sprite = getTankSprite(tank.direction);
         for (let dy = 0; dy < 5; dy++) {
           for (let dx = 0; dx < 5; dx++) {
@@ -252,10 +258,12 @@ export class Renderer {
             const py = sy + dy;
             if (px < viewX || px >= viewX + VIEWPORT_WIDTH) continue;
             if (py < 0 || py >= VIEWPORT_HEIGHT) continue;
+            ctx.globalAlpha = invulnAlpha;
             ctx.fillStyle = pixel === 2 ? PLAYER_COLORS[t] : PLAYER_DARK_COLORS[t];
             ctx.fillRect(px, py, 1, 1);
           }
         }
+        ctx.globalAlpha = 1;
       }
 
       // Draw bullets

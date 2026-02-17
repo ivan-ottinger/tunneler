@@ -80,6 +80,7 @@ export class Game {
       reloadTimer: 0,
       digCooldown: 0,
       baseCampTicks: 0,
+      invulnTicks: 0,
       bullets: [],
       base: { x: 0, y: 0, owner: index },
     };

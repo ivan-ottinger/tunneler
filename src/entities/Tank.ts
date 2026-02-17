@@ -3,7 +3,7 @@ import {
   DIR_DELTA, TANK_SIZE, MOVE_ENERGY_COST, MOVE_EMPTY_ENERGY_COST, IDLE_ENERGY_COST,
   MAX_ENERGY, MAX_SHIELD,
   BASE_SIZE, BASE_ENERGY_REGEN, BASE_SHIELD_REGEN,
-  ENEMY_BASE_ENERGY_REGEN, BASE_CAMP_TIMEOUT,
+  ENEMY_BASE_ENERGY_REGEN, BASE_CAMP_TIMEOUT, INVULN_TICKS,
   DIG_COOLDOWN_TICKS, DIG_COOLDOWN_FIRING,
   EXPLOSION_PARTICLE_COUNT,
   EXPLOSION_PARTICLE_SPEED_MIN, EXPLOSION_PARTICLE_SPEED_MAX,
@@ -25,6 +25,8 @@ export function updateTank(
     handleRespawn(state, playerIndex);
     return;
   }
+
+  if (player.invulnTicks > 0) player.invulnTicks--;
 
   handleMovement(state, player, input, playerIndex, sound);
   handleRefueling(state, player, playerIndex);
@@ -221,5 +223,6 @@ function respawnTank(player: Player): void {
   player.reloadTimer = 0;
   player.digCooldown = 0;
   player.baseCampTicks = 0;
+  player.invulnTicks = INVULN_TICKS;
   player.bullets = [];
 }

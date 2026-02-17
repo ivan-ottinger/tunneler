@@ -69,6 +69,7 @@ export const DIG_COOLDOWN_FIRING = 0; // no cooldown while firing
 // Game flow
 export const KILLS_TO_WIN = 3;
 export const RESPAWN_TICKS = 30; // 3 seconds
+export const INVULN_TICKS = 15; // 1.5 seconds of invulnerability after respawn
 export const TICK_DURATION_MS = 100;
 
 // Rendering
