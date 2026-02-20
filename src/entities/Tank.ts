@@ -112,7 +112,16 @@ function handleMovement(
 
   player.x = newX;
   player.y = newY;
-  player.energy -= hasDirt ? MOVE_ENERGY_COST : MOVE_EMPTY_ENERGY_COST;
+
+  // No energy cost for moving inside own base
+  const ownBase = state.players[playerIndex].base;
+  const inOwnBase = rectsOverlap(
+    player.x, player.y, TANK_SIZE, TANK_SIZE,
+    ownBase.x + 1, ownBase.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
+  );
+  if (!inOwnBase) {
+    player.energy -= hasDirt ? MOVE_ENERGY_COST : MOVE_EMPTY_ENERGY_COST;
+  }
 
   // Self-destruct if energy depleted — opponent gets the kill
   if (player.energy <= 0) {
