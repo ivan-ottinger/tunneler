@@ -93,6 +93,7 @@ function handleMovement(
     markDirtyRect(state.dirtyTiles, state.mapWidth, player.x, player.y, TANK_SIZE, TANK_SIZE);
     digRect(state.map, state.mapWidth, newX, newY, TANK_SIZE, TANK_SIZE);
     markDirtyRect(state.dirtyTiles, state.mapWidth, newX, newY, TANK_SIZE, TANK_SIZE);
+    sound.playDig();
   } else {
     // Mark old position dirty
     markDirtyRect(state.dirtyTiles, state.mapWidth, player.x, player.y, TANK_SIZE, TANK_SIZE);
