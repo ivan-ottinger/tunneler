@@ -66,6 +66,38 @@ export class SoundManager {
     noise.stop(now + 0.12);
   }
 
+  /** Short gritty scrape when digging through dirt */
+  playDig(): void {
+    const ctx = this.ensureContext();
+    const now = ctx.currentTime;
+
+    // Very short noise burst filtered to sound like scraping
+    const bufLen = Math.floor(ctx.sampleRate * 0.04);
+    const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufLen; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    const noise = ctx.createBufferSource();
+    noise.buffer = buf;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1200, now);
+    filter.Q.setValueAtTime(2, now);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.08, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+
+    noise.start(now);
+    noise.stop(now + 0.04);
+  }
+
   /** Boom when a tank explodes */
   playExplosion(): void {
     const ctx = this.ensureContext();
