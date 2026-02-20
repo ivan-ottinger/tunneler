@@ -47,6 +47,7 @@ const GLYPHS: Record<string, number[]> = {
   '=': [0b000, 0b111, 0b000, 0b111, 0b000],
   ':': [0b000, 0b010, 0b000, 0b010, 0b000],
   '!': [0b010, 0b010, 0b010, 0b000, 0b010],
+  '?': [0b111, 0b001, 0b010, 0b000, 0b010],
 };
 
 /** Draw a single character at (x, y) with optional scale */
