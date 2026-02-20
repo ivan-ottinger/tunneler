@@ -170,23 +170,24 @@ function handleRefueling(
     }
   }
 
-  // Neutral outpost — regens like own base, grants one-time bonus on first visit
-  // Only applies when outpost is unowned; when AI owns it, it's just an enemy base
+  // Outpost: one-time power-up always available, regen only when neutral
   const outpost = state.outpost;
-  if (outpost.owner === -1) {
-    const inOutpost = rectsOverlap(
-      player.x, player.y, TANK_SIZE, TANK_SIZE,
-      outpost.x + 1, outpost.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
-    );
-    if (inOutpost) {
+  const inOutpost = rectsOverlap(
+    player.x, player.y, TANK_SIZE, TANK_SIZE,
+    outpost.x + 1, outpost.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
+  );
+  if (inOutpost) {
+    // Regen only when outpost is neutral; when AI owns it, it's just an enemy base
+    if (outpost.owner === -1) {
       player.energy = Math.min(MAX_ENERGY, player.energy + OUTPOST_ENERGY_REGEN);
       player.shield = Math.min(MAX_SHIELD, player.shield + OUTPOST_SHIELD_REGEN);
+    }
 
-      if (!state.outpostClaimed[playerIndex]) {
-        state.outpostClaimed[playerIndex] = true;
-        player.bonus = Math.random() < 0.5 ? BonusType.SpeedDig : BonusType.PowerCannon;
-        sound.playPowerUp();
-      }
+    // One-time power-up on first visit regardless of owner
+    if (!state.outpostClaimed[playerIndex]) {
+      state.outpostClaimed[playerIndex] = true;
+      player.bonus = Math.random() < 0.5 ? BonusType.SpeedDig : BonusType.PowerCannon;
+      sound.playPowerUp();
     }
   }
 }
