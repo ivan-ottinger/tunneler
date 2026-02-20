@@ -1,3 +1,11 @@
+export enum BonusType {
+  None = 0,
+  SpeedDig = 1,      // Dig cooldown always 0
+  PowerCannon = 2,   // Double damage, faster bullets, evil sound
+  ScatterShot = 3,   // Fire 3 bullets in a spread
+  WideBore = 4,      // Dig 9x9 tunnels instead of 5x5
+}
+
 /** Numpad-style direction encoding: 5 = stationary */
 export enum Direction {
   None = 0,
@@ -38,6 +46,8 @@ export interface Bullet {
   direction: Direction;
   age: number;
   owner: number; // player index
+  fdx?: number; // fractional delta x (overrides direction for scatter bullets)
+  fdy?: number;
 }
 
 export interface Base {
@@ -59,6 +69,7 @@ export interface Player {
   digCooldown: number;
   baseCampTicks: number; // continuous ticks spent inside own base
   invulnTicks: number; // ticks of invulnerability remaining after respawn
+  bonus: BonusType;
   bullets: Bullet[];
   base: Base;
 }
@@ -80,6 +91,8 @@ export interface GameState {
   winner: number; // -1 if no winner
   dirtyTiles: Set<number>; // indices of tiles changed since last frame
   particles: ExplosionParticle[];
+  outpost: Base;
+  outpostClaimed: [boolean, boolean];
 }
 
 export interface Effect {

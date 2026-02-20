@@ -98,6 +98,114 @@ export class SoundManager {
     noise.stop(now + 0.04);
   }
 
+  /** Deep aggressive "BWOM" — power cannon shot */
+  playEvilShoot(): void {
+    const ctx = this.ensureContext();
+    const now = ctx.currentTime;
+
+    // Deep sawtooth growl with waveshaper distortion
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(300, now);
+    osc.frequency.exponentialRampToValueAtTime(50, now + 0.15);
+
+    const distortion = ctx.createWaveShaper();
+    const curve = new Float32Array(256);
+    for (let i = 0; i < 256; i++) {
+      const x = (i / 128) - 1;
+      curve[i] = Math.tanh(x * 3);
+    }
+    distortion.curve = curve;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+    osc.connect(distortion);
+    distortion.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.18);
+  }
+
+  /** Retro cheat code activation jingle */
+  playCheatActivate(): void {
+    const ctx = this.ensureContext();
+    const now = ctx.currentTime;
+
+    const notes = [261.63, 329.63, 392.00, 523.25]; // C4, E4, G4, C5
+    for (let i = 0; i < notes.length; i++) {
+      const t = now + i * 0.06;
+      const duration = i === notes.length - 1 ? 0.3 : 0.1;
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(notes[i], t);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.25, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(t);
+      osc.stop(t + duration);
+    }
+  }
+
+  /** Descending cheat code deactivation jingle */
+  playCheatDeactivate(): void {
+    const ctx = this.ensureContext();
+    const now = ctx.currentTime;
+
+    const notes = [523.25, 392.00, 329.63, 261.63]; // C5, G4, E4, C4
+    for (let i = 0; i < notes.length; i++) {
+      const t = now + i * 0.06;
+      const duration = i === notes.length - 1 ? 0.3 : 0.1;
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(notes[i], t);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.25, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(t);
+      osc.stop(t + duration);
+    }
+  }
+
+  /** Ascending chiptune power-up chime */
+  playPowerUp(): void {
+    const ctx = this.ensureContext();
+    const now = ctx.currentTime;
+
+    const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+    for (let i = 0; i < notes.length; i++) {
+      const t = now + i * 0.08;
+      const osc = ctx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(notes[i], t);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.2, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(t);
+      osc.stop(t + 0.12);
+    }
+  }
+
   /** Boom when a tank explodes */
   playExplosion(): void {
     const ctx = this.ensureContext();
