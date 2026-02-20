@@ -18,6 +18,7 @@ import { Renderer } from './render/Renderer.js';
 import { SoundManager } from './engine/SoundManager.js';
 import { drawTitleScreen } from './ui/TitleScreen.js';
 import { drawGameOverScreen, GAME_OVER_TEXT_HEIGHT } from './ui/GameOverScreen.js';
+import { drawPauseScreen } from './ui/PauseScreen.js';
 
 export class Game {
   private state!: GameState;
@@ -31,6 +32,11 @@ export class Game {
   private cheatMode = false;
   private cheatKeyWasDown = false;
   private digitKeysDown = [false, false, false, false];
+  private paused = false;
+  private pauseSelection = 0;
+  private escWasDown = false;
+  private pauseNavWasDown = false;
+  private pauseConfirmWasDown = false;
   private uiCanvas: OffscreenCanvas;
   private uiCtx: OffscreenCanvasRenderingContext2D;
 
@@ -70,6 +76,7 @@ export class Game {
       outpost: { x: 0, y: 0, owner: -1 },
       outpostClaimed: [false, false],
     };
+    this.paused = false;
   }
 
   private createPlayer(index: number): Player {
@@ -132,6 +139,7 @@ export class Game {
     };
 
     this.matchOverDelay = 0;
+    this.paused = false;
     this.renderer.initTerrain(this.state);
   }
 
@@ -159,6 +167,44 @@ export class Game {
       }
 
       case GamePhase.Playing: {
+        // Toggle pause with Escape (edge-triggered)
+        const escDown = this.input.isPressed('Escape');
+        if (escDown && !this.escWasDown) {
+          if (this.paused) {
+            this.paused = false;
+          } else {
+            this.paused = true;
+            this.pauseSelection = 0;
+          }
+        }
+        this.escWasDown = escDown;
+
+        if (this.paused) {
+          const leftPressed = this.input.isAnyPressed('ArrowLeft', 'KeyA', 'KeyH');
+          const rightPressed = this.input.isAnyPressed('ArrowRight', 'KeyD', 'KeyK');
+
+          if (leftPressed && !this.pauseNavWasDown) {
+            this.pauseSelection = 0;
+          }
+          if (rightPressed && !this.pauseNavWasDown) {
+            this.pauseSelection = 1;
+          }
+          this.pauseNavWasDown = leftPressed || rightPressed;
+
+          const confirmPressed = this.input.isAnyPressed('Space', 'Enter');
+          if (confirmPressed && !this.pauseConfirmWasDown) {
+            if (this.pauseSelection === 1) {
+              this.paused = false;
+              this.initState();
+            } else {
+              this.paused = false;
+            }
+          }
+          this.pauseConfirmWasDown = confirmPressed;
+
+          break;
+        }
+
         state.tickCount++;
 
         // Toggle map with M key (edge-triggered, cheat mode only)
@@ -327,6 +373,10 @@ export class Game {
           this.renderer.renderFullMap(state);
         } else {
           this.renderer.render(state);
+        }
+        if (this.paused) {
+          const displayCtx = this.canvas.getContext('2d')!;
+          drawPauseScreen(displayCtx, this.pauseSelection, this.canvas.width, this.canvas.height);
         }
         break;
 
