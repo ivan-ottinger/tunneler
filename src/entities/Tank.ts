@@ -171,19 +171,22 @@ function handleRefueling(
   }
 
   // Neutral outpost — regens like own base, grants one-time bonus on first visit
+  // Only applies when outpost is unowned; when AI owns it, it's just an enemy base
   const outpost = state.outpost;
-  const inOutpost = rectsOverlap(
-    player.x, player.y, TANK_SIZE, TANK_SIZE,
-    outpost.x + 1, outpost.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
-  );
-  if (inOutpost) {
-    player.energy = Math.min(MAX_ENERGY, player.energy + OUTPOST_ENERGY_REGEN);
-    player.shield = Math.min(MAX_SHIELD, player.shield + OUTPOST_SHIELD_REGEN);
+  if (outpost.owner === -1) {
+    const inOutpost = rectsOverlap(
+      player.x, player.y, TANK_SIZE, TANK_SIZE,
+      outpost.x + 1, outpost.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
+    );
+    if (inOutpost) {
+      player.energy = Math.min(MAX_ENERGY, player.energy + OUTPOST_ENERGY_REGEN);
+      player.shield = Math.min(MAX_SHIELD, player.shield + OUTPOST_SHIELD_REGEN);
 
-    if (!state.outpostClaimed[playerIndex]) {
-      state.outpostClaimed[playerIndex] = true;
-      player.bonus = Math.random() < 0.5 ? BonusType.SpeedDig : BonusType.PowerCannon;
-      sound.playPowerUp();
+      if (!state.outpostClaimed[playerIndex]) {
+        state.outpostClaimed[playerIndex] = true;
+        player.bonus = Math.random() < 0.5 ? BonusType.SpeedDig : BonusType.PowerCannon;
+        sound.playPowerUp();
+      }
     }
   }
 }
@@ -200,12 +203,13 @@ function handleIdleDrain(
     player.x, player.y, TANK_SIZE, TANK_SIZE,
     base.x + 1, base.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
   );
+  // Outpost only exempts from drain when neutral (not owned by AI)
   const outpost = state.outpost;
-  const inOutpost = rectsOverlap(
+  const inNeutralOutpost = outpost.owner === -1 && rectsOverlap(
     player.x, player.y, TANK_SIZE, TANK_SIZE,
     outpost.x + 1, outpost.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
   );
-  if (!inOwnBase && !inOutpost) {
+  if (!inOwnBase && !inNeutralOutpost) {
     player.energy -= IDLE_ENERGY_COST;
     if (player.energy <= 0) {
       creditKillToNearest(state, playerIndex);
