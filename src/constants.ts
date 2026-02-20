@@ -165,3 +165,30 @@ export const CAVE_FREQUENCY = 0.04;
 export const CAVE_THRESHOLD = 0.6;
 export const DIRT_VARIANT_FREQUENCY = 0.1;
 export const DIRT_VARIANT_THRESHOLD = 0.3;
+
+// Rich dirt color palettes (indexed by noise value)
+export const DIRT_PALETTE = [
+  '#6B3D00', // Dark earth
+  '#8B5000', // Medium brown
+  '#AA5500', // CGA Brown
+  '#8B5A18', // Golden brown
+];
+export const DIRT_VARIANT_PALETTE = [
+  '#5B2500', // Deep clay
+  '#7B3200', // Dark sienna
+  '#993D00', // Burnt sienna
+  '#6B3010', // Warm umber
+];
+
+// Darkened edge palettes (for dirt adjacent to tunnels — adds depth)
+function darkenHex(hex: string, factor: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return '#' +
+    Math.floor(r * factor).toString(16).padStart(2, '0') +
+    Math.floor(g * factor).toString(16).padStart(2, '0') +
+    Math.floor(b * factor).toString(16).padStart(2, '0');
+}
+export const DIRT_PALETTE_EDGE = DIRT_PALETTE.map(c => darkenHex(c, 0.6));
+export const DIRT_VARIANT_PALETTE_EDGE = DIRT_VARIANT_PALETTE.map(c => darkenHex(c, 0.6));

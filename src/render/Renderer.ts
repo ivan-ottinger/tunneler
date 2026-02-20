@@ -1,3 +1,4 @@
+import { createNoise2D } from 'simplex-noise';
 import { GameState, Effect, TileType } from '../types.js';
 import {
   RENDER_SCALE, VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
@@ -5,7 +6,10 @@ import {
   TILE_COLORS, PLAYER_COLORS, PLAYER_DARK_COLORS, TANK_SIZE,
   CGA_PALETTE, BASE_SIZE, BASE_ENTRANCE_WIDTH, BASE_CAMP_TIMEOUT,
   RESPAWN_TICKS, OUTPOST_COLOR,
+  DIRT_PALETTE, DIRT_VARIANT_PALETTE,
+  DIRT_PALETTE_EDGE, DIRT_VARIANT_PALETTE_EDGE,
 } from '../constants.js';
+import { createRng } from '../map/sfc32.js';
 import { calculateViewport } from './ViewportCalculator.js';
 import { drawStatusPanel } from './StatusPanel.js';
 import { getTankSprite } from './TankSprites.js';
@@ -18,6 +22,7 @@ export class Renderer {
   private terrainCtx: OffscreenCanvasRenderingContext2D;
   private terrainDirty = true;
   private effects: Effect[] = [];
+  private dirtNoise: ((x: number, y: number) => number) | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
     // Set display size
@@ -40,6 +45,7 @@ export class Renderer {
   initTerrain(state: GameState): void {
     this.terrainCanvas = new OffscreenCanvas(state.mapWidth, state.mapHeight);
     this.terrainCtx = this.terrainCanvas.getContext('2d')!;
+    this.dirtNoise = createNoise2D(createRng(state.seed + 100));
     this.renderFullTerrain(state);
   }
 
@@ -50,7 +56,11 @@ export class Renderer {
     for (let y = 0; y < mapHeight; y++) {
       for (let x = 0; x < mapWidth; x++) {
         const tile = map[y * mapWidth + x] as TileType;
-        ctx.fillStyle = TILE_COLORS[tile];
+        if (tile === TileType.Dirt || tile === TileType.DirtVariant) {
+          ctx.fillStyle = this.getDirtColor(x, y, tile, map, mapWidth, mapHeight);
+        } else {
+          ctx.fillStyle = TILE_COLORS[tile];
+        }
         ctx.fillRect(x, y, 1, 1);
       }
     }
@@ -59,6 +69,50 @@ export class Renderer {
     this.paintBaseWalls(state, ctx);
 
     this.terrainDirty = false;
+  }
+
+  /** Compute a rich dirt color using multi-octave noise + edge darkening */
+  private getDirtColor(
+    x: number, y: number, tile: TileType,
+    map: Uint8Array, mapWidth: number, mapHeight: number,
+  ): string {
+    if (!this.dirtNoise) return TILE_COLORS[tile];
+
+    // 3 octaves of noise for natural geological variation
+    const n =
+      this.dirtNoise(x * 0.008, y * 0.008) * 0.5 +
+      this.dirtNoise(x * 0.03,  y * 0.03)  * 0.3 +
+      this.dirtNoise(x * 0.12,  y * 0.12)  * 0.2;
+
+    const isVariant = tile === TileType.DirtVariant;
+    const palette = isVariant ? DIRT_VARIANT_PALETTE : DIRT_PALETTE;
+    const edgePalette = isVariant ? DIRT_VARIANT_PALETTE_EDGE : DIRT_PALETTE_EDGE;
+
+    // Map noise [-1, 1] → palette index
+    const normalized = Math.max(0, Math.min(1, (n + 1) / 2));
+    const index = Math.min(Math.floor(normalized * palette.length), palette.length - 1);
+
+    // Darken dirt adjacent to open space for tunnel depth
+    const isEdge = this.isAdjacentToEmpty(x, y, map, mapWidth, mapHeight);
+    return isEdge ? edgePalette[index] : palette[index];
+  }
+
+  /** Check if a tile has any empty/interior neighbor (8-connected) */
+  private isAdjacentToEmpty(
+    x: number, y: number,
+    map: Uint8Array, mapWidth: number, mapHeight: number,
+  ): boolean {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || nx >= mapWidth || ny < 0 || ny >= mapHeight) continue;
+        const t = map[ny * mapWidth + nx];
+        if (t === TileType.Empty || t === TileType.BaseInterior) return true;
+      }
+    }
+    return false;
   }
 
   /** Paint base wall tiles in the owning player's color */
@@ -94,10 +148,34 @@ export class Renderer {
   }
 
   private updateDirtyTerrain(state: GameState): void {
-    const { map, mapWidth, dirtyTiles } = state;
+    const { map, mapWidth, mapHeight, dirtyTiles } = state;
     const ctx = this.terrainCtx;
 
+    // Expand dirty set: when a tile becomes empty, its dirt neighbors
+    // may need edge darkening updated
+    const toRender = new Set(dirtyTiles);
     for (const idx of dirtyTiles) {
+      const tile = map[idx] as TileType;
+      if (tile === TileType.Empty || tile === TileType.BaseInterior) {
+        const x = idx % mapWidth;
+        const y = Math.floor(idx / mapWidth);
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || nx >= mapWidth || ny < 0 || ny >= mapHeight) continue;
+            const nIdx = ny * mapWidth + nx;
+            const nTile = map[nIdx] as TileType;
+            if (nTile === TileType.Dirt || nTile === TileType.DirtVariant) {
+              toRender.add(nIdx);
+            }
+          }
+        }
+      }
+    }
+
+    for (const idx of toRender) {
       const x = idx % mapWidth;
       const y = Math.floor(idx / mapWidth);
       const tile = map[idx] as TileType;
@@ -117,6 +195,8 @@ export class Renderer {
           color = OUTPOST_COLOR;
         }
         ctx.fillStyle = color;
+      } else if (tile === TileType.Dirt || tile === TileType.DirtVariant) {
+        ctx.fillStyle = this.getDirtColor(x, y, tile, map, mapWidth, mapHeight);
       } else {
         ctx.fillStyle = TILE_COLORS[tile];
       }
