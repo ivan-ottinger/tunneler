@@ -112,12 +112,24 @@ export const TILE_COLORS: Record<TileType, string> = {
 export const PLAYER_COLORS = [
   CGA_PALETTE[11], // P1: Light Cyan (barrel)
   CGA_PALETTE[10], // P2: Light Green (barrel)
+  CGA_PALETTE[13], // AI: Light Magenta (barrel)
 ] as const;
 
 export const PLAYER_DARK_COLORS = [
   CGA_PALETTE[9],  // P1: Light Blue (body)
   CGA_PALETTE[2],  // P2: Green (body)
+  CGA_PALETTE[5],  // AI: Magenta (body)
 ] as const;
+
+// AI tank
+export const AI_PLAYER_INDEX = 2;
+export const AI_DETECT_RANGE = 120;
+export const AI_FIRE_RANGE = 60;
+export const AI_RETREAT_ENERGY = 500;
+export const AI_RETREAT_SHIELD = 3;
+export const AI_PATH_RECALC_TICKS = 30;
+export const AI_FIRE_PROBABILITY = 0.4;
+export const AI_COARSE_TILE_SIZE = 5;
 
 // Direction deltas (x, y) — screen coords (y-down)
 export const DIR_DELTA: Record<Direction, [number, number]> = {

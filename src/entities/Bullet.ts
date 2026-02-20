@@ -99,7 +99,7 @@ function digBulletImpact(
 }
 
 export function updateBullets(state: GameState, renderer: Renderer, sound: SoundManager): void {
-  for (let p = 0; p < 2; p++) {
+  for (let p = 0; p < state.players.length; p++) {
     const player = state.players[p];
     const surviving: Bullet[] = [];
 
@@ -156,31 +156,37 @@ export function updateBullets(state: GameState, renderer: Renderer, sound: Sound
           break;
         }
 
-        // Hit opponent tank (skip if invulnerable)
-        const opponent = state.players[1 - p];
-        if (opponent.alive && opponent.invulnTicks <= 0 && rectsOverlap(
-          bx, by, 1, 1,
-          opponent.x, opponent.y, TANK_SIZE, TANK_SIZE,
-        )) {
-          opponent.shield -= damage;
-          sound.playHit();
-          renderer.addShake(1 - p, 2); // shake the hit player's viewport
-          digCrater(
-            state.map, state.mapWidth, state.mapHeight,
-            bx, by, TANK_HIT_CRATER_RADIUS,
-            state.tickCount * 1000 + bx,
-            state.dirtyTiles,
-          );
-          alive = false;
+        // Hit any non-self player tank (skip if invulnerable)
+        let hitOpponent = false;
+        for (let o = 0; o < state.players.length; o++) {
+          if (o === p) continue;
+          const opponent = state.players[o];
+          if (opponent.alive && opponent.invulnTicks <= 0 && rectsOverlap(
+            bx, by, 1, 1,
+            opponent.x, opponent.y, TANK_SIZE, TANK_SIZE,
+          )) {
+            opponent.shield -= damage;
+            sound.playHit();
+            if (o < 2) renderer.addShake(o, 2); // only shake human viewports
+            digCrater(
+              state.map, state.mapWidth, state.mapHeight,
+              bx, by, TANK_HIT_CRATER_RADIUS,
+              state.tickCount * 1000 + bx,
+              state.dirtyTiles,
+            );
+            alive = false;
+            hitOpponent = true;
 
-          if (opponent.shield <= 0) {
-            player.score++;
-            renderer.addShake(0, 4); // big shake for both on kill
-            renderer.addShake(1, 4);
-            destroyTank(state, opponent, sound);
+            if (opponent.shield <= 0) {
+              player.score++;
+              renderer.addShake(0, 4); // big shake for both human viewports on kill
+              renderer.addShake(1, 4);
+              destroyTank(state, opponent, sound);
+            }
+            break;
           }
-          break;
         }
+        if (hitOpponent) break;
       }
 
       if (alive) {

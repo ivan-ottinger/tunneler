@@ -18,8 +18,9 @@ export function drawGameOverScreen(
 
   // Winner + score below the map
   const winnerColor = PLAYER_COLORS[state.winner];
-  const score = `${state.players[0].score} - ${state.players[1].score}`;
-  drawBitmapTextCentered(ctx, `P${state.winner + 1} WINS  ${score}`, cx, mapBottomY + 8, winnerColor, textScale);
+  const winnerLabel = state.players[state.winner].isAI ? 'AI WINS' : `P${state.winner + 1} WINS`;
+  const score = state.players.map(p => p.score).join(' - ');
+  drawBitmapTextCentered(ctx, `${winnerLabel}  ${score}`, cx, mapBottomY + 8, winnerColor, textScale);
 
   // Prompts
   drawBitmapTextCentered(ctx, 'SPACE = REMATCH   ESC = TITLE', cx, mapBottomY + 8 + textScale * 7, CGA_PALETTE[8], textScale);

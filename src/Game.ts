@@ -5,7 +5,7 @@ import {
   MAP_WIDTH, MAP_HEIGHT, MAX_ENERGY, MAX_SHIELD,
   BASE_SIZE, TANK_SIZE,
   CANVAS_WIDTH, CANVAS_HEIGHT,
-  KILLS_TO_WIN, EXPLOSION_DIG_RADIUS,
+  KILLS_TO_WIN, EXPLOSION_DIG_RADIUS, AI_PLAYER_INDEX,
 } from './constants.js';
 import { markDirtyRect } from './map/TerrainModifier.js';
 import { GameLoop } from './engine/GameLoop.js';
@@ -19,6 +19,7 @@ import { SoundManager } from './engine/SoundManager.js';
 import { drawTitleScreen } from './ui/TitleScreen.js';
 import { drawGameOverScreen, GAME_OVER_TEXT_HEIGHT } from './ui/GameOverScreen.js';
 import { drawPauseScreen } from './ui/PauseScreen.js';
+import { AIController } from './ai/AIController.js';
 
 export class Game {
   private state!: GameState;
@@ -37,6 +38,9 @@ export class Game {
   private escWasDown = false;
   private pauseNavWasDown = false;
   private pauseConfirmWasDown = false;
+  private aiController = new AIController();
+  private aiEnabled = true;
+  private aiToggleWasDown = false;
   private uiCanvas: OffscreenCanvas;
   private uiCtx: OffscreenCanvasRenderingContext2D;
 
@@ -79,7 +83,7 @@ export class Game {
     this.paused = false;
   }
 
-  private createPlayer(index: number): Player {
+  private createPlayer(index: number, isAI = false): Player {
     return {
       x: 0,
       y: 0,
@@ -96,6 +100,7 @@ export class Game {
       bonus: BonusType.None,
       bullets: [],
       base: { x: 0, y: 0, owner: index },
+      isAI,
     };
   }
 
@@ -107,9 +112,8 @@ export class Game {
     const base0 = placeBase(map, MAP_WIDTH, MAP_HEIGHT, 0, seed);
     const base1 = placeBase(map, MAP_WIDTH, MAP_HEIGHT, 1, seed, [base0]);
 
-    // Place neutral outpost far from both player bases
+    // Place outpost far from both player bases
     const outpost = placeBase(map, MAP_WIDTH, MAP_HEIGHT, 2, seed, [base0, base1]);
-    outpost.owner = -1;
 
     // Create fresh players
     const p0 = this.createPlayer(0);
@@ -122,12 +126,30 @@ export class Game {
     p1.x = base1.x + Math.floor(BASE_SIZE / 2) - Math.floor(TANK_SIZE / 2);
     p1.y = base1.y + Math.floor(BASE_SIZE / 2) - Math.floor(TANK_SIZE / 2);
 
+    const players: Player[] = [p0, p1];
+    const outpostClaimed: boolean[] = [false, false];
+
+    if (this.aiEnabled) {
+      // AI player spawns at the outpost — outpost becomes AI's home base
+      const aiPlayer = this.createPlayer(AI_PLAYER_INDEX, true);
+      aiPlayer.base = outpost;
+      aiPlayer.x = outpost.x + Math.floor(BASE_SIZE / 2) - Math.floor(TANK_SIZE / 2);
+      aiPlayer.y = outpost.y + Math.floor(BASE_SIZE / 2) - Math.floor(TANK_SIZE / 2);
+      outpost.owner = AI_PLAYER_INDEX;
+      players.push(aiPlayer);
+      outpostClaimed.push(false);
+      this.aiController.reset();
+    } else {
+      // Neutral outpost — no AI
+      outpost.owner = -1;
+    }
+
     this.state = {
       phase: GamePhase.Playing,
       map,
       mapWidth: MAP_WIDTH,
       mapHeight: MAP_HEIGHT,
-      players: [p0, p1],
+      players,
       viewports: [{ scrollX: 0, scrollY: 0 }, { scrollX: 0, scrollY: 0 }],
       tickCount: 0,
       seed,
@@ -135,7 +157,7 @@ export class Game {
       dirtyTiles: new Set(),
       particles: [],
       outpost,
-      outpostClaimed: [false, false],
+      outpostClaimed,
     };
 
     this.matchOverDelay = 0;
@@ -159,6 +181,13 @@ export class Game {
           }
         }
         this.cheatKeyWasDown = cDown;
+
+        // Toggle AI with T key (edge-triggered)
+        const tDown = this.input.isPressed('KeyT');
+        if (tDown && !this.aiToggleWasDown) {
+          this.aiEnabled = !this.aiEnabled;
+        }
+        this.aiToggleWasDown = tDown;
 
         if (this.input.isAnyPressed('Space', 'Enter')) {
           this.startMatch();
@@ -214,15 +243,14 @@ export class Game {
         }
         this.mapKeyWasDown = mDown;
 
-        // Cheat: number keys apply bonuses to both players
+        // Cheat: number keys apply bonuses to all players
         if (this.cheatMode) {
           const bonusKeys = ['Digit1', 'Digit2', 'Digit3', 'Digit4'];
           const bonusTypes = [BonusType.SpeedDig, BonusType.PowerCannon, BonusType.ScatterShot, BonusType.WideBore];
           for (let i = 0; i < 4; i++) {
             const down = this.input.isPressed(bonusKeys[i]);
             if (down && !this.digitKeysDown[i]) {
-              state.players[0].bonus = bonusTypes[i];
-              state.players[1].bonus = bonusTypes[i];
+              for (const p of state.players) p.bonus = bonusTypes[i];
               this.sound.playPowerUp();
             }
             this.digitKeysDown[i] = down;
@@ -241,6 +269,13 @@ export class Game {
         handleFiring(state, 0, input0.fire, this.renderer, this.sound);
         handleFiring(state, 1, input1.fire, this.renderer, this.sound);
 
+        // AI tank update
+        if (this.aiEnabled && state.players.length > AI_PLAYER_INDEX) {
+          const aiInput = this.aiController.getInput(state);
+          updateTank(state, AI_PLAYER_INDEX, aiInput, this.sound);
+          handleFiring(state, AI_PLAYER_INDEX, aiInput.fire, this.renderer, this.sound);
+        }
+
         // Update bullets
         updateBullets(state, this.renderer, this.sound);
 
@@ -254,7 +289,7 @@ export class Game {
             state.phase = GamePhase.MatchOver;
           }
         } else {
-          for (let p = 0; p < 2; p++) {
+          for (let p = 0; p < state.players.length; p++) {
             if (state.players[p].score >= KILLS_TO_WIN) {
               state.winner = p;
               this.matchOverDelay = 20; // 2 seconds to watch the explosion
@@ -364,7 +399,7 @@ export class Game {
 
     switch (state.phase) {
       case GamePhase.Title:
-        drawTitleScreen(this.uiCtx);
+        drawTitleScreen(this.uiCtx, this.aiEnabled);
         this.blitUI();
         break;
 
