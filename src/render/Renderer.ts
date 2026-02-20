@@ -23,6 +23,8 @@ export class Renderer {
   private terrainDirty = true;
   private effects: Effect[] = [];
   private dirtNoise: ((x: number, y: number) => number) | null = null;
+  /** Per-player screen shake: [intensity0, intensity1] in pixels */
+  private shake: [number, number] = [0, 0];
 
   constructor(private canvas: HTMLCanvasElement) {
     // Set display size
@@ -40,6 +42,11 @@ export class Renderer {
 
   addEffect(effect: Effect): void {
     this.effects.push(effect);
+  }
+
+  /** Trigger screen shake for a specific player's viewport */
+  addShake(playerIndex: number, intensity: number): void {
+    this.shake[playerIndex] = Math.max(this.shake[playerIndex], intensity);
   }
 
   initTerrain(state: GameState): void {
@@ -289,10 +296,18 @@ export class Renderer {
       const viewX = p === 0 ? 0 : VIEWPORT_WIDTH + STATUS_PANEL_WIDTH;
       const vp = state.viewports[p];
 
+      // Apply screen shake as random offset
+      let shakeX = 0;
+      let shakeY = 0;
+      if (this.shake[p] > 0.1) {
+        shakeX = Math.round((Math.random() - 0.5) * 2 * this.shake[p]);
+        shakeY = Math.round((Math.random() - 0.5) * 2 * this.shake[p]);
+      }
+
       // Draw terrain slice from terrain canvas
       ctx.drawImage(
         this.terrainCanvas,
-        vp.scrollX, vp.scrollY, VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
+        vp.scrollX + shakeX, vp.scrollY + shakeY, VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
         viewX, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
       );
 
@@ -403,6 +418,10 @@ export class Renderer {
     this.effects = this.effects
       .map(e => ({ ...e, framesLeft: e.framesLeft - 1 }))
       .filter(e => e.framesLeft > 0);
+
+    // Decay screen shake
+    this.shake[0] *= 0.7;
+    this.shake[1] *= 0.7;
 
     // Scale up to display canvas
     const displayCtx = this.canvas.getContext('2d')!;

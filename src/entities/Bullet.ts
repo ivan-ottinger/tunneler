@@ -164,6 +164,7 @@ export function updateBullets(state: GameState, renderer: Renderer, sound: Sound
         )) {
           opponent.shield -= damage;
           sound.playHit();
+          renderer.addShake(1 - p, 2); // shake the hit player's viewport
           digCrater(
             state.map, state.mapWidth, state.mapHeight,
             bx, by, TANK_HIT_CRATER_RADIUS,
@@ -174,6 +175,8 @@ export function updateBullets(state: GameState, renderer: Renderer, sound: Sound
 
           if (opponent.shield <= 0) {
             player.score++;
+            renderer.addShake(0, 4); // big shake for both on kill
+            renderer.addShake(1, 4);
             destroyTank(state, opponent, sound);
           }
           break;
