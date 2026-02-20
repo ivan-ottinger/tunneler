@@ -1,8 +1,11 @@
-import { Bullet, Direction, GameState, TileType } from '../types.js';
+import { BonusType, Bullet, Direction, GameState, TileType } from '../types.js';
 import {
   DIR_DELTA, TANK_SIZE, FIRE_ENERGY_COST, MAX_BULLETS,
   RELOAD_TICKS, BULLET_BASE_SPEED, BULLET_ACCEL_INTERVAL,
   BULLET_DIG_SIZE, TANK_HIT_CRATER_RADIUS, BULLET_DAMAGE,
+  POWER_CANNON_DAMAGE, POWER_CANNON_BULLET_SPEED, POWER_CANNON_CRATER_RADIUS,
+  POWER_CANNON_RELOAD_TICKS, POWER_CANNON_MAX_BULLETS,
+  SCATTER_SPREAD_ANGLE,
 } from '../constants.js';
 import { digCrater, digRect, markDirtyRect } from '../map/TerrainModifier.js';
 import { rectsOverlap } from '../engine/CollisionDetector.js';
@@ -33,28 +36,54 @@ export function handleFiring(
 
   if (!fire || !player.alive) return;
   if (player.reloadTimer > 0) return;
-  if (player.bullets.length >= MAX_BULLETS) return;
+  const isPowerCannon = player.bonus === BonusType.PowerCannon;
+  const maxBullets = isPowerCannon ? POWER_CANNON_MAX_BULLETS : MAX_BULLETS;
+  if (player.bullets.length >= maxBullets) return;
   if (player.energy < FIRE_ENERGY_COST) return;
   if (player.direction === Direction.None || player.direction === Direction.Stationary) return;
 
   player.energy -= FIRE_ENERGY_COST;
-  player.reloadTimer = RELOAD_TICKS;
+  player.reloadTimer = isPowerCannon ? POWER_CANNON_RELOAD_TICKS : RELOAD_TICKS;
 
   const [tipX, tipY] = getBarrelTip(player.x, player.y, player.direction);
-  const [dx, dy] = DIR_DELTA[player.direction];
 
-  // Spawn bullet 1 step behind the barrel tip so the first movement
-  // step lands exactly on the tip and checks that tile for dirt
-  player.bullets.push({
-    x: tipX - dx,
-    y: tipY - dy,
-    direction: player.direction,
-    age: 0,
-    owner: playerIndex,
-  });
+  // Scatter shot fires 3 bullets: center + two angled side shots
+  if (player.bonus === BonusType.ScatterShot) {
+    const [cdx, cdy] = DIR_DELTA[player.direction];
+    const baseAngle = Math.atan2(cdy, cdx);
+
+    // Center bullet — normal direction-based movement
+    player.bullets.push({
+      x: tipX - cdx, y: tipY - cdy,
+      direction: player.direction, age: 0, owner: playerIndex,
+    });
+
+    // Two side bullets with fractional deltas
+    for (const sign of [-1, 1]) {
+      const angle = baseAngle + sign * SCATTER_SPREAD_ANGLE;
+      player.bullets.push({
+        x: tipX - cdx, y: tipY - cdy,
+        direction: player.direction, age: 0, owner: playerIndex,
+        fdx: Math.cos(angle), fdy: Math.sin(angle),
+      });
+    }
+  } else {
+    const [dx, dy] = DIR_DELTA[player.direction];
+    player.bullets.push({
+      x: tipX - dx,
+      y: tipY - dy,
+      direction: player.direction,
+      age: 0,
+      owner: playerIndex,
+    });
+  }
 
   renderer.addEffect({ x: tipX, y: tipY, type: 'muzzleFlash', framesLeft: 2, owner: playerIndex });
-  sound.playShoot();
+  if (player.bonus === BonusType.PowerCannon) {
+    sound.playEvilShoot();
+  } else {
+    sound.playShoot();
+  }
 }
 
 /** Dig a small rect centered on bullet impact */
@@ -74,10 +103,17 @@ export function updateBullets(state: GameState, renderer: Renderer, sound: Sound
     const player = state.players[p];
     const surviving: Bullet[] = [];
 
+    const hasPowerCannon = player.bonus === BonusType.PowerCannon;
+    const baseSpeed = hasPowerCannon ? POWER_CANNON_BULLET_SPEED : BULLET_BASE_SPEED;
+    const damage = hasPowerCannon ? POWER_CANNON_DAMAGE : BULLET_DAMAGE;
+
     for (const bullet of player.bullets) {
       bullet.age++;
-      const speed = BULLET_BASE_SPEED * (1 + Math.floor(bullet.age / BULLET_ACCEL_INTERVAL));
-      const [dx, dy] = DIR_DELTA[bullet.direction];
+      const speed = baseSpeed * (1 + Math.floor(bullet.age / BULLET_ACCEL_INTERVAL));
+      const useFractional = bullet.fdx !== undefined && bullet.fdy !== undefined;
+      const [ddx, ddy] = DIR_DELTA[bullet.direction];
+      const dx = useFractional ? bullet.fdx! : ddx;
+      const dy = useFractional ? bullet.fdy! : ddy;
 
       let alive = true;
 
@@ -85,14 +121,17 @@ export function updateBullets(state: GameState, renderer: Renderer, sound: Sound
         bullet.x += dx;
         bullet.y += dy;
 
+        const bx = Math.floor(bullet.x);
+        const by = Math.floor(bullet.y);
+
         // Out of bounds
-        if (bullet.x < 0 || bullet.x >= state.mapWidth ||
-            bullet.y < 0 || bullet.y >= state.mapHeight) {
+        if (bx < 0 || bx >= state.mapWidth ||
+            by < 0 || by >= state.mapHeight) {
           alive = false;
           break;
         }
 
-        const idx = bullet.y * state.mapWidth + bullet.x;
+        const idx = by * state.mapWidth + bx;
         const tile = state.map[idx];
 
         // Hit rock or base wall — just remove
@@ -101,9 +140,18 @@ export function updateBullets(state: GameState, renderer: Renderer, sound: Sound
           break;
         }
 
-        // Hit dirt — dig small rect and remove
+        // Hit dirt — power cannon blasts a crater, normal bullets dig a small rect
         if (tile === TileType.Dirt || tile === TileType.DirtVariant) {
-          digBulletImpact(state, bullet.x, bullet.y);
+          if (hasPowerCannon) {
+            digCrater(
+              state.map, state.mapWidth, state.mapHeight,
+              bx, by, POWER_CANNON_CRATER_RADIUS,
+              state.tickCount * 1000 + bx,
+              state.dirtyTiles,
+            );
+          } else {
+            digBulletImpact(state, bx, by);
+          }
           alive = false;
           break;
         }
@@ -111,15 +159,15 @@ export function updateBullets(state: GameState, renderer: Renderer, sound: Sound
         // Hit opponent tank (skip if invulnerable)
         const opponent = state.players[1 - p];
         if (opponent.alive && opponent.invulnTicks <= 0 && rectsOverlap(
-          bullet.x, bullet.y, 1, 1,
+          bx, by, 1, 1,
           opponent.x, opponent.y, TANK_SIZE, TANK_SIZE,
         )) {
-          opponent.shield -= BULLET_DAMAGE;
+          opponent.shield -= damage;
           sound.playHit();
           digCrater(
             state.map, state.mapWidth, state.mapHeight,
-            bullet.x, bullet.y, TANK_HIT_CRATER_RADIUS,
-            state.tickCount * 1000 + bullet.x,
+            bx, by, TANK_HIT_CRATER_RADIUS,
+            state.tickCount * 1000 + bx,
             state.dirtyTiles,
           );
           alive = false;

@@ -1,4 +1,4 @@
-import { GameState, RenderContext } from '../types.js';
+import { BonusType, GameState, RenderContext } from '../types.js';
 import {
   CGA_PALETTE, MAX_ENERGY, MAX_SHIELD,
   VIEWPORT_WIDTH, STATUS_PANEL_WIDTH, VIEWPORT_HEIGHT,
@@ -80,6 +80,24 @@ export function drawStatusPanel(
     drawBitmapText(ctx, 'H', barX, healthLabelY, CGA_PALETTE[12], 1);
     drawBar(ctx, barX + 5, healthLabelY, barW - 5,
       player.shield, MAX_SHIELD, CGA_PALETTE[12], CGA_PALETTE[7]);
+
+    // Bonus indicator
+    if (player.bonus !== BonusType.None) {
+      const bonusY = healthLabelY + 8;
+      const bonusLabels: Record<number, string> = {
+        [BonusType.SpeedDig]: 'DIG',
+        [BonusType.PowerCannon]: 'PWR',
+        [BonusType.ScatterShot]: 'SCT',
+        [BonusType.WideBore]: 'WDE',
+      };
+      const bonusColors: Record<number, string> = {
+        [BonusType.SpeedDig]: CGA_PALETTE[10],    // green
+        [BonusType.PowerCannon]: CGA_PALETTE[12],  // red
+        [BonusType.ScatterShot]: CGA_PALETTE[14],  // yellow
+        [BonusType.WideBore]: CGA_PALETTE[11],     // cyan
+      };
+      drawBitmapTextCentered(ctx, bonusLabels[player.bonus] ?? '', panelCx, bonusY, bonusColors[player.bonus] ?? CGA_PALETTE[15], 1);
+    }
   }
 
   // Divider between players

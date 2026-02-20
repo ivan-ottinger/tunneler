@@ -1,10 +1,11 @@
-import { Direction, GameState, Player, PlayerInput, TileType } from '../types.js';
+import { BonusType, Direction, GameState, Player, PlayerInput, TileType } from '../types.js';
 import {
   DIR_DELTA, TANK_SIZE, MOVE_ENERGY_COST, MOVE_EMPTY_ENERGY_COST, IDLE_ENERGY_COST,
   MAX_ENERGY, MAX_SHIELD,
   BASE_SIZE, BASE_ENERGY_REGEN, BASE_SHIELD_REGEN,
   ENEMY_BASE_ENERGY_REGEN, BASE_CAMP_TIMEOUT, INVULN_TICKS,
-  DIG_COOLDOWN_TICKS, DIG_COOLDOWN_FIRING,
+  OUTPOST_ENERGY_REGEN, OUTPOST_SHIELD_REGEN,
+  DIG_COOLDOWN_TICKS, DIG_COOLDOWN_FIRING, WIDE_BORE_DIG_SIZE,
   EXPLOSION_PARTICLE_COUNT,
   EXPLOSION_PARTICLE_SPEED_MIN, EXPLOSION_PARTICLE_SPEED_MAX,
   EXPLOSION_PARTICLE_LIFE_MIN, EXPLOSION_PARTICLE_LIFE_MAX,
@@ -29,7 +30,7 @@ export function updateTank(
   if (player.invulnTicks > 0) player.invulnTicks--;
 
   handleMovement(state, player, input, playerIndex, sound);
-  handleRefueling(state, player, playerIndex);
+  handleRefueling(state, player, playerIndex, sound);
   handleIdleDrain(state, player, playerIndex, sound);
 }
 
@@ -83,20 +84,30 @@ function handleMovement(
     if (hasDirt) break;
   }
 
+  // Wide Bore digs a larger area around the tank
+  const isWideBore = player.bonus === BonusType.WideBore;
+  const digSize = isWideBore ? WIDE_BORE_DIG_SIZE : TANK_SIZE;
+  const digOffset = isWideBore ? Math.floor((WIDE_BORE_DIG_SIZE - TANK_SIZE) / 2) : 0;
+
   if (hasDirt) {
-    // Apply dig cooldown — slower digging, but faster while firing
+    // Apply dig cooldown — slower digging, but faster while firing or with SpeedDig bonus
     if (player.digCooldown > 0) return;
-    const cooldown = input.fire ? DIG_COOLDOWN_FIRING : DIG_COOLDOWN_TICKS;
+    const cooldown = (input.fire || player.bonus === BonusType.SpeedDig) ? DIG_COOLDOWN_FIRING : DIG_COOLDOWN_TICKS;
     player.digCooldown = cooldown;
 
     // Mark old position dirty before digging
     markDirtyRect(state.dirtyTiles, state.mapWidth, player.x, player.y, TANK_SIZE, TANK_SIZE);
-    digRect(state.map, state.mapWidth, newX, newY, TANK_SIZE, TANK_SIZE);
-    markDirtyRect(state.dirtyTiles, state.mapWidth, newX, newY, TANK_SIZE, TANK_SIZE);
+    digRect(state.map, state.mapWidth, newX - digOffset, newY - digOffset, digSize, digSize);
+    markDirtyRect(state.dirtyTiles, state.mapWidth, newX - digOffset, newY - digOffset, digSize, digSize);
     sound.playDig();
   } else {
     // Mark old position dirty
     markDirtyRect(state.dirtyTiles, state.mapWidth, player.x, player.y, TANK_SIZE, TANK_SIZE);
+    // Wide Bore also widens existing tunnels when moving through empty space
+    if (isWideBore) {
+      digRect(state.map, state.mapWidth, newX - digOffset, newY - digOffset, digSize, digSize);
+      markDirtyRect(state.dirtyTiles, state.mapWidth, newX - digOffset, newY - digOffset, digSize, digSize);
+    }
   }
 
   player.x = newX;
@@ -114,6 +125,7 @@ function handleRefueling(
   state: GameState,
   player: Player,
   playerIndex: number,
+  sound: SoundManager,
 ): void {
   const ownBase = state.players[playerIndex].base;
   const inOwnBase = rectsOverlap(
@@ -144,6 +156,23 @@ function handleRefueling(
   )) {
     player.energy = Math.min(MAX_ENERGY, player.energy + ENEMY_BASE_ENERGY_REGEN);
   }
+
+  // Neutral outpost — regens like own base, grants one-time bonus on first visit
+  const outpost = state.outpost;
+  const inOutpost = rectsOverlap(
+    player.x, player.y, TANK_SIZE, TANK_SIZE,
+    outpost.x + 1, outpost.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
+  );
+  if (inOutpost) {
+    player.energy = Math.min(MAX_ENERGY, player.energy + OUTPOST_ENERGY_REGEN);
+    player.shield = Math.min(MAX_SHIELD, player.shield + OUTPOST_SHIELD_REGEN);
+
+    if (!state.outpostClaimed[playerIndex]) {
+      state.outpostClaimed[playerIndex] = true;
+      player.bonus = Math.random() < 0.5 ? BonusType.SpeedDig : BonusType.PowerCannon;
+      sound.playPowerUp();
+    }
+  }
 }
 
 function handleIdleDrain(
@@ -152,13 +181,18 @@ function handleIdleDrain(
   playerIndex: number,
   sound: SoundManager,
 ): void {
-  // Slowly drain energy when outside own base
+  // Slowly drain energy when outside any friendly base
   const base = state.players[playerIndex].base;
   const inOwnBase = rectsOverlap(
     player.x, player.y, TANK_SIZE, TANK_SIZE,
     base.x + 1, base.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
   );
-  if (!inOwnBase) {
+  const outpost = state.outpost;
+  const inOutpost = rectsOverlap(
+    player.x, player.y, TANK_SIZE, TANK_SIZE,
+    outpost.x + 1, outpost.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
+  );
+  if (!inOwnBase && !inOutpost) {
     player.energy -= IDLE_ENERGY_COST;
     if (player.energy <= 0) {
       state.players[1 - playerIndex].score++;

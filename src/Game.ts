@@ -1,5 +1,5 @@
 import {
-  GameState, GamePhase, Direction, Player, TileType,
+  GameState, GamePhase, Direction, Player, TileType, BonusType,
 } from './types.js';
 import {
   MAP_WIDTH, MAP_HEIGHT, MAX_ENERGY, MAX_SHIELD,
@@ -28,6 +28,9 @@ export class Game {
   private matchOverDelay = 0;
   private showMap = false;
   private mapKeyWasDown = false;
+  private cheatMode = false;
+  private cheatKeyWasDown = false;
+  private digitKeysDown = [false, false, false, false];
   private uiCanvas: OffscreenCanvas;
   private uiCtx: OffscreenCanvasRenderingContext2D;
 
@@ -64,6 +67,8 @@ export class Game {
       winner: -1,
       dirtyTiles: new Set(),
       particles: [],
+      outpost: { x: 0, y: 0, owner: -1 },
+      outpostClaimed: [false, false],
     };
   }
 
@@ -81,6 +86,7 @@ export class Game {
       digCooldown: 0,
       baseCampTicks: 0,
       invulnTicks: 0,
+      bonus: BonusType.None,
       bullets: [],
       base: { x: 0, y: 0, owner: index },
     };
@@ -93,6 +99,10 @@ export class Game {
     // Place bases — P2 must be far enough from P1
     const base0 = placeBase(map, MAP_WIDTH, MAP_HEIGHT, 0, seed);
     const base1 = placeBase(map, MAP_WIDTH, MAP_HEIGHT, 1, seed, [base0]);
+
+    // Place neutral outpost far from both player bases
+    const outpost = placeBase(map, MAP_WIDTH, MAP_HEIGHT, 2, seed, [base0, base1]);
+    outpost.owner = -1;
 
     // Create fresh players
     const p0 = this.createPlayer(0);
@@ -117,6 +127,8 @@ export class Game {
       winner: -1,
       dirtyTiles: new Set(),
       particles: [],
+      outpost,
+      outpostClaimed: [false, false],
     };
 
     this.matchOverDelay = 0;
@@ -127,21 +139,49 @@ export class Game {
     const { state } = this;
 
     switch (state.phase) {
-      case GamePhase.Title:
+      case GamePhase.Title: {
+        // Toggle cheat mode with C key (edge-triggered)
+        const cDown = this.input.isPressed('KeyC');
+        if (cDown && !this.cheatKeyWasDown) {
+          this.cheatMode = !this.cheatMode;
+          if (this.cheatMode) {
+            this.sound.playCheatActivate();
+          } else {
+            this.sound.playCheatDeactivate();
+          }
+        }
+        this.cheatKeyWasDown = cDown;
+
         if (this.input.isAnyPressed('Space', 'Enter')) {
           this.startMatch();
         }
         break;
+      }
 
       case GamePhase.Playing: {
         state.tickCount++;
 
-        // Toggle map with M key (edge-triggered)
+        // Toggle map with M key (edge-triggered, cheat mode only)
         const mDown = this.input.isPressed('KeyM');
-        if (mDown && !this.mapKeyWasDown) {
+        if (mDown && !this.mapKeyWasDown && this.cheatMode) {
           this.showMap = !this.showMap;
         }
         this.mapKeyWasDown = mDown;
+
+        // Cheat: number keys apply bonuses to both players
+        if (this.cheatMode) {
+          const bonusKeys = ['Digit1', 'Digit2', 'Digit3', 'Digit4'];
+          const bonusTypes = [BonusType.SpeedDig, BonusType.PowerCannon, BonusType.ScatterShot, BonusType.WideBore];
+          for (let i = 0; i < 4; i++) {
+            const down = this.input.isPressed(bonusKeys[i]);
+            if (down && !this.digitKeysDown[i]) {
+              state.players[0].bonus = bonusTypes[i];
+              state.players[1].bonus = bonusTypes[i];
+              this.sound.playPowerUp();
+            }
+            this.digitKeysDown[i] = down;
+          }
+        }
 
         // Get inputs
         const input0 = this.input.getPlayerInput(0);

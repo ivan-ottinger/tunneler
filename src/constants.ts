@@ -44,6 +44,24 @@ export const BASE_SHIELD_REGEN = 0.2;
 export const ENEMY_BASE_ENERGY_REGEN = 3;
 export const BASE_CAMP_TIMEOUT = 100; // ticks (~10 seconds) before regen stops
 
+// Outpost (neutral base)
+export const OUTPOST_ENERGY_REGEN = 5;
+export const OUTPOST_SHIELD_REGEN = 0.2;
+export const OUTPOST_COLOR = CGA_PALETTE[5]; // Magenta
+
+// Power cannon bonus
+export const POWER_CANNON_DAMAGE = 2;
+export const POWER_CANNON_BULLET_SPEED = 1; // slower than normal (2), no acceleration
+export const POWER_CANNON_CRATER_RADIUS = 5; // large crater when hitting dirt
+export const POWER_CANNON_RELOAD_TICKS = 5; // slow reload (~500ms)
+export const POWER_CANNON_MAX_BULLETS = 3; // fewer in flight at once
+
+// Scatter shot bonus
+export const SCATTER_SPREAD_ANGLE = Math.PI / 12; // ~15° half-angle
+
+// Wide bore bonus
+export const WIDE_BORE_DIG_SIZE = 9;
+
 // Bullets
 export const MAX_BULLETS = 10;
 export const RELOAD_TICKS = 1; // 100ms at 100ms ticks

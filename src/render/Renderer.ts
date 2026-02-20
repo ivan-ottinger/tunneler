@@ -4,7 +4,7 @@ import {
   STATUS_PANEL_WIDTH, CANVAS_WIDTH, CANVAS_HEIGHT,
   TILE_COLORS, PLAYER_COLORS, PLAYER_DARK_COLORS, TANK_SIZE,
   CGA_PALETTE, BASE_SIZE, BASE_ENTRANCE_WIDTH, BASE_CAMP_TIMEOUT,
-  RESPAWN_TICKS,
+  RESPAWN_TICKS, OUTPOST_COLOR,
 } from '../constants.js';
 import { calculateViewport } from './ViewportCalculator.js';
 import { drawStatusPanel } from './StatusPanel.js';
@@ -65,9 +65,15 @@ export class Renderer {
   private paintBaseWalls(state: GameState, ctx: OffscreenCanvasRenderingContext2D): void {
     const entranceOffset = Math.floor((BASE_SIZE - BASE_ENTRANCE_WIDTH) / 2);
 
-    for (let p = 0; p < 2; p++) {
-      const base = state.players[p].base;
-      ctx.fillStyle = PLAYER_DARK_COLORS[p];
+    // Player bases + outpost
+    const bases = [
+      { base: state.players[0].base, color: PLAYER_DARK_COLORS[0] },
+      { base: state.players[1].base, color: PLAYER_DARK_COLORS[1] },
+      { base: state.outpost, color: OUTPOST_COLOR },
+    ];
+
+    for (const { base, color } of bases) {
+      ctx.fillStyle = color;
 
       for (let dy = 0; dy < BASE_SIZE; dy++) {
         for (let dx = 0; dx < BASE_SIZE; dx++) {
@@ -97,7 +103,7 @@ export class Renderer {
       const tile = map[idx] as TileType;
 
       if (tile === TileType.BaseWall) {
-        // Determine which player owns this base wall
+        // Determine which player/outpost owns this base wall
         let color = TILE_COLORS[tile];
         for (let p = 0; p < 2; p++) {
           const base = state.players[p].base;
@@ -105,6 +111,10 @@ export class Renderer {
             color = PLAYER_DARK_COLORS[p];
             break;
           }
+        }
+        const outpost = state.outpost;
+        if (x >= outpost.x && x < outpost.x + BASE_SIZE && y >= outpost.y && y < outpost.y + BASE_SIZE) {
+          color = OUTPOST_COLOR;
         }
         ctx.fillStyle = color;
       } else {
@@ -272,8 +282,8 @@ export class Renderer {
         const bullets = state.players[t].bullets;
         ctx.fillStyle = CGA_PALETTE[15]; // white
         for (const bullet of bullets) {
-          const bx = bullet.x - vp.scrollX + viewX;
-          const by = bullet.y - vp.scrollY;
+          const bx = Math.floor(bullet.x) - vp.scrollX + viewX;
+          const by = Math.floor(bullet.y) - vp.scrollY;
           if (bx >= viewX && bx < viewX + VIEWPORT_WIDTH &&
               by >= 0 && by < VIEWPORT_HEIGHT) {
             ctx.fillRect(bx, by, 1, 1);
