@@ -263,7 +263,7 @@ export class Game {
           const speedDown = this.input.isPressed('Digit0');
           if (speedDown && !this.speedKeyWasDown) {
             this.doubleSpeed = !this.doubleSpeed;
-            this.loop.tickDuration = this.doubleSpeed ? TICK_DURATION_MS / 3 : TICK_DURATION_MS;
+            this.loop.tickDuration = this.doubleSpeed ? TICK_DURATION_MS / 10 : TICK_DURATION_MS;
           }
           this.speedKeyWasDown = speedDown;
         }

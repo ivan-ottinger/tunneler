@@ -66,11 +66,29 @@ interface DirResult {
   wallSide: number; // 0 = no deflection, 1 = CW, -1 = CCW
 }
 
+/** Decompose a diagonal direction into its two cardinal components. */
+const DIAGONAL_CARDINALS: Partial<Record<Direction, [Direction, Direction]>> = {
+  [Direction.UpLeft]: [Direction.Up, Direction.Left],
+  [Direction.UpRight]: [Direction.Up, Direction.Right],
+  [Direction.DownLeft]: [Direction.Down, Direction.Left],
+  [Direction.DownRight]: [Direction.Down, Direction.Right],
+};
+
 /** Try the ideal direction, then rotations biased by wallSide preference for consistent wall-following. */
 function findPassableDirection(state: GameState, x: number, y: number, ideal: Direction, wallSide: number): DirResult {
   if (ideal === Direction.None) return { dir: Direction.None, wallSide: 0 };
   // Try ideal first — if it works, obstacle is cleared
   if (!wouldBeBlocked(state, x, y, ideal)) return { dir: ideal, wallSide: 0 };
+
+  // If the ideal was diagonal and blocked, try each cardinal component first.
+  // This naturally threads narrow passages (e.g., base entrances) where the
+  // diagonal clips a wall but one cardinal axis is clear.
+  const cardinals = DIAGONAL_CARDINALS[ideal];
+  if (cardinals) {
+    for (const c of cardinals) {
+      if (!wouldBeBlocked(state, x, y, c)) return { dir: c, wallSide: 0 };
+    }
+  }
 
   const idx = dirIndex(ideal);
   if (idx < 0) return { dir: ideal, wallSide: 0 };
@@ -137,6 +155,8 @@ export class AIController {
   private discoveredBases = new Set<number>(); // player indices whose bases have been spotted
   private discoveredOutpost = false;
   private exitTarget: { x: number; y: number } | null = null; // locked entrance target when exiting a base
+  /** Last known positions of enemy tanks — updated whenever visible, revisited during patrol */
+  private lastSeen = new Map<number, { x: number; y: number; tick: number }>();
 
   reset(mapWidth = 0, mapHeight = 0): void {
     this.state = AIState.Patrol;
@@ -169,6 +189,7 @@ export class AIController {
     this.discoveredBases.add(AI_PLAYER_INDEX); // always know own base
     this.discoveredOutpost = false;
     this.exitTarget = null;
+    this.lastSeen.clear();
   }
 
   getInput(gameState: GameState): PlayerInput {
@@ -246,6 +267,22 @@ export class AIController {
         bestScore = score;
         nearestDist = dist;
         nearestIdx = i;
+      }
+    }
+
+    // Record last-known positions of all visible enemies
+    for (let i = 0; i < gameState.players.length; i++) {
+      if (i === AI_PLAYER_INDEX) continue;
+      const p = gameState.players[i];
+      if (!p.alive) continue;
+      const dx = (p.x + Math.floor(TANK_SIZE / 2)) - cx;
+      const dy = (p.y + Math.floor(TANK_SIZE / 2)) - cy;
+      if (dx * dx + dy * dy < AI_DETECT_RANGE * AI_DETECT_RANGE) {
+        this.lastSeen.set(i, {
+          x: p.x + Math.floor(TANK_SIZE / 2),
+          y: p.y + Math.floor(TANK_SIZE / 2),
+          tick: gameState.tickCount,
+        });
       }
     }
 
@@ -619,6 +656,13 @@ export class AIController {
             });
           }
 
+          // Include last-known enemy positions (fade after 300 ticks / ~30 seconds)
+          for (const [idx, seen] of this.lastSeen) {
+            if (idx === AI_PLAYER_INDEX) continue;
+            if (gameState.tickCount - seen.tick > 300) continue; // stale — ignore
+            candidates.push({ x: seen.x, y: seen.y });
+          }
+
           // Add random points — more when no bases discovered yet (pure exploration)
           const randomCount = candidates.length === 0 ? 4 : 2;
           for (let c = 0; c < randomCount; c++) {
@@ -648,7 +692,39 @@ export class AIController {
           const target = gameState.players[nearestIdx];
           const tx = target.x + Math.floor(TANK_SIZE / 2);
           const ty = target.y + Math.floor(TANK_SIZE / 2);
-          this.path = this.pathfinder.findPath(cx, cy, tx, ty);
+
+          // Check if target is inside a base — if so, path to nearest entrance instead
+          let pathX = tx;
+          let pathY = ty;
+          const allBases: { x: number; y: number }[] = [];
+          for (let i = 0; i < gameState.players.length; i++) {
+            allBases.push(gameState.players[i].base);
+          }
+          allBases.push(gameState.outpost);
+
+          for (const b of allBases) {
+            if (rectsOverlap(
+              target.x, target.y, TANK_SIZE, TANK_SIZE,
+              b.x + 1, b.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
+            )) {
+              // Target is inside this base — find the entrance closest to the AI
+              const entrances = getBaseEntrances(b.x, b.y);
+              let bestDist = Infinity;
+              for (const e of entrances) {
+                const edx = e.x - cx;
+                const edy = e.y - cy;
+                const d = edx * edx + edy * edy;
+                if (d < bestDist) {
+                  bestDist = d;
+                  pathX = e.x;
+                  pathY = e.y;
+                }
+              }
+              break;
+            }
+          }
+
+          this.path = this.pathfinder.findPath(cx, cy, pathX, pathY);
         }
         break;
       }
