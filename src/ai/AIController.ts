@@ -101,15 +101,16 @@ function findPassableDirection(state: GameState, x: number, y: number, ideal: Di
   return { dir: ideal, wallSide: 0 };
 }
 
-/** Get the four entrance center positions for a base at (baseX, baseY). */
+/** Get exit points outside each entrance, far enough that a tank fully clears the base. */
 function getBaseEntrances(baseX: number, baseY: number): { x: number; y: number }[] {
   const entrOff = Math.floor((BASE_SIZE - BASE_ENTRANCE_WIDTH) / 2);
   const entrMid = entrOff + Math.floor(BASE_ENTRANCE_WIDTH / 2);
+  const clearance = TANK_SIZE + 2; // far enough outside so the tank fully exits
   return [
-    { x: baseX + entrMid, y: baseY - 1 },              // top
-    { x: baseX + entrMid, y: baseY + BASE_SIZE },       // bottom
-    { x: baseX - 1, y: baseY + entrMid },               // left
-    { x: baseX + BASE_SIZE, y: baseY + entrMid },       // right
+    { x: baseX + entrMid, y: baseY - clearance },              // top
+    { x: baseX + entrMid, y: baseY + BASE_SIZE + clearance },  // bottom
+    { x: baseX - clearance, y: baseY + entrMid },              // left
+    { x: baseX + BASE_SIZE + clearance, y: baseY + entrMid },  // right
   ];
 }
 
