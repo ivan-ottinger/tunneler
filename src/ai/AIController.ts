@@ -155,6 +155,8 @@ export class AIController {
   private discoveredBases = new Set<number>(); // player indices whose bases have been spotted
   private discoveredOutpost = false;
   private exitTarget: { x: number; y: number } | null = null; // locked entrance target when exiting a base
+  /** Locked entrance center + axis when approaching a base from outside (last-mile threading) */
+  private entranceTarget: { x: number; y: number; axis: 'v' | 'h' } | null = null;
   /** Last known positions of enemy tanks — updated whenever visible, revisited during patrol */
   private lastSeen = new Map<number, { x: number; y: number; tick: number }>();
 
@@ -189,6 +191,7 @@ export class AIController {
     this.discoveredBases.add(AI_PLAYER_INDEX); // always know own base
     this.discoveredOutpost = false;
     this.exitTarget = null;
+    this.entranceTarget = null;
     this.lastSeen.clear();
   }
 
@@ -212,6 +215,7 @@ export class AIController {
       this.wallSide = 0;
       this.wallFollowTicks = 0;
       this.exitTarget = null;
+      this.entranceTarget = null;
       // Pick an immediate patrol target so the AI moves right away after respawn
       this.patrolTarget = {
         x: 20 + Math.floor(Math.random() * (gameState.mapWidth - 40)),
@@ -382,9 +386,20 @@ export class AIController {
 
     let moveDir = Direction.None;
 
+    // Check if chase target is inside the same base as the AI
+    let targetInSameBase = false;
+    if (insideAnyBase && this.state === AIState.Chase && nearestIdx >= 0 && !inOwnBase) {
+      const target = gameState.players[nearestIdx];
+      targetInSameBase = rectsOverlap(
+        target.x, target.y, TANK_SIZE, TANK_SIZE,
+        insideBaseX + 1, insideBaseY + 1, BASE_SIZE - 2, BASE_SIZE - 2,
+      );
+    }
+
     // When inside a base, use entrance-aware navigation to avoid getting stuck on walls
-    // Exception: stay put when retreating to own base (recharging)
-    if (insideAnyBase && !(inOwnBase && this.state === AIState.Retreat)) {
+    // Exceptions: stay put when retreating to own base (recharging),
+    //             or move toward target when chasing inside enemy base
+    if (insideAnyBase && !(inOwnBase && this.state === AIState.Retreat) && !targetInSameBase) {
       // Lock in an exit target to prevent flip-flopping between entrances
       if (!this.exitTarget) {
         if (inOwnBase) {
@@ -464,8 +479,18 @@ export class AIController {
     } else {
       // No longer inside a base — clear locked exit target
       this.exitTarget = null;
+      this.entranceTarget = null;
 
-      if (this.path.length > 0) {
+      // When chasing a target inside the same enemy base, move directly toward them
+      if (targetInSameBase && nearestIdx >= 0) {
+        const target = gameState.players[nearestIdx];
+        const tdx = (target.x + Math.floor(TANK_SIZE / 2)) - cx;
+        const tdy = (target.y + Math.floor(TANK_SIZE / 2)) - cy;
+        const idealDir = directionToward(tdx, tdy);
+        const r = findPassableDirection(gameState, ai.x, ai.y, idealDir, this.wallSide);
+        moveDir = r.dir;
+        this.wallSide = r.wallSide;
+      } else if (this.path.length > 0) {
         const wp = this.path[0];
         const dx = wp.x - cx;
         const dy = wp.y - cy;
@@ -516,6 +541,73 @@ export class AIController {
             const r = findPassableDirection(gameState, ai.x, ai.y, idealDir, this.wallSide);
             moveDir = r.dir;
             this.wallSide = r.wallSide;
+          }
+        }
+      }
+    }
+
+    // Clear entrance target when we enter the base or leave Chase mode
+    if (this.entranceTarget && (insideAnyBase || this.state !== AIState.Chase)) {
+      this.entranceTarget = null;
+    }
+
+    // Last-mile entrance threading: path is consumed but target is inside a base.
+    // Lock in an entrance and use axis-aligned movement to thread through it.
+    if (this.state === AIState.Chase && moveDir === Direction.None && !insideAnyBase && nearestIdx >= 0) {
+      // Lock in entrance on first activation — don't change it every tick
+      if (!this.entranceTarget) {
+        const target = gameState.players[nearestIdx];
+        const allBases: { x: number; y: number }[] = [];
+        for (let i = 0; i < gameState.players.length; i++) {
+          allBases.push(gameState.players[i].base);
+        }
+        allBases.push(gameState.outpost);
+
+        for (const b of allBases) {
+          if (!rectsOverlap(
+            target.x, target.y, TANK_SIZE, TANK_SIZE,
+            b.x + 1, b.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
+          )) continue;
+
+          const entrOff = Math.floor((BASE_SIZE - BASE_ENTRANCE_WIDTH) / 2);
+          const entrMid = entrOff + Math.floor(BASE_ENTRANCE_WIDTH / 2);
+          const entranceCenters = [
+            { x: b.x + entrMid, y: b.y,              axis: 'v' as const },
+            { x: b.x + entrMid, y: b.y + BASE_SIZE,  axis: 'v' as const },
+            { x: b.x,              y: b.y + entrMid,  axis: 'h' as const },
+            { x: b.x + BASE_SIZE,  y: b.y + entrMid,  axis: 'h' as const },
+          ];
+
+          let bestEntr = entranceCenters[0];
+          let bestDist = Infinity;
+          for (const e of entranceCenters) {
+            const edx = e.x - cx;
+            const edy = e.y - cy;
+            const d = edx * edx + edy * edy;
+            if (d < bestDist) { bestDist = d; bestEntr = e; }
+          }
+          this.entranceTarget = bestEntr;
+          break;
+        }
+      }
+
+      // Navigate toward the locked entrance target
+      if (this.entranceTarget) {
+        const edx = this.entranceTarget.x - cx;
+        const edy = this.entranceTarget.y - cy;
+        if (this.entranceTarget.axis === 'v') {
+          moveDir = Math.abs(edx) > 1
+            ? (edx > 0 ? Direction.Right : Direction.Left)
+            : (edy > 0 ? Direction.Down : Direction.Up);
+        } else {
+          moveDir = Math.abs(edy) > 1
+            ? (edy > 0 ? Direction.Down : Direction.Up)
+            : (edx > 0 ? Direction.Right : Direction.Left);
+        }
+        if (wouldBeBlocked(gameState, ai.x, ai.y, moveDir)) {
+          const fallback = directionToward(edx, edy);
+          if (!wouldBeBlocked(gameState, ai.x, ai.y, fallback)) {
+            moveDir = fallback;
           }
         }
       }
