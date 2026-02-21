@@ -114,57 +114,6 @@ function getBaseEntrances(baseX: number, baseY: number): { x: number; y: number 
   ];
 }
 
-/** Navigate toward the entrance closest to the goal (for own base — pick the best exit). */
-function getBaseExitTowardGoal(
-  tankX: number, tankY: number,
-  baseX: number, baseY: number,
-  goalX: number, goalY: number,
-): Direction {
-  const half = Math.floor(TANK_SIZE / 2);
-  const cx = tankX + half;
-  const cy = tankY + half;
-  const entrances = getBaseEntrances(baseX, baseY);
-
-  let bestEntrance = entrances[0];
-  let bestScore = Infinity;
-  for (const e of entrances) {
-    const dx = e.x - goalX;
-    const dy = e.y - goalY;
-    const score = dx * dx + dy * dy;
-    if (score < bestScore) {
-      bestScore = score;
-      bestEntrance = e;
-    }
-  }
-
-  return directionToward(bestEntrance.x - cx, bestEntrance.y - cy);
-}
-
-/** Navigate toward the nearest entrance (for enemy bases — just get out fast). */
-function getBaseExitNearest(
-  tankX: number, tankY: number,
-  baseX: number, baseY: number,
-): Direction {
-  const half = Math.floor(TANK_SIZE / 2);
-  const cx = tankX + half;
-  const cy = tankY + half;
-  const entrances = getBaseEntrances(baseX, baseY);
-
-  let bestEntrance = entrances[0];
-  let bestDist = Infinity;
-  for (const e of entrances) {
-    const dx = e.x - cx;
-    const dy = e.y - cy;
-    const dist = dx * dx + dy * dy;
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestEntrance = e;
-    }
-  }
-
-  return directionToward(bestEntrance.x - cx, bestEntrance.y - cy);
-}
-
 export class AIController {
   private state = AIState.Patrol;
   private pathfinder = new CoarsePathfinder();
@@ -439,13 +388,42 @@ export class AIController {
           this.exitTarget = best;
         }
       }
-      const exitDir = directionToward(
-        this.exitTarget.x - (ai.x + Math.floor(TANK_SIZE / 2)),
-        this.exitTarget.y - (ai.y + Math.floor(TANK_SIZE / 2)),
-      );
-      const result = findPassableDirection(gameState, ai.x, ai.y, exitDir, this.wallSide);
-      moveDir = result.dir;
-      this.wallSide = result.wallSide;
+      // Navigate toward exit using axis-aligned movement to thread narrow entrances.
+      // First align with the entrance center on the perpendicular axis, then move through.
+      const half = Math.floor(TANK_SIZE / 2);
+      const dx = this.exitTarget.x - (ai.x + half);
+      const dy = this.exitTarget.y - (ai.y + half);
+      const absDx = Math.abs(dx);
+      const absDy = Math.abs(dy);
+
+      // Determine if this is a horizontal or vertical entrance based on exit target
+      // Top/bottom entrances: exitTarget has same X as entrance center, Y is far outside
+      // Left/right entrances: exitTarget has same Y as entrance center, X is far outside
+      const isVerticalExit = absDy > absDx; // top or bottom entrance
+
+      if (isVerticalExit) {
+        // First align X with entrance center, then move Y through
+        if (absDx > 1) {
+          moveDir = dx > 0 ? Direction.Right : Direction.Left;
+        } else {
+          moveDir = dy > 0 ? Direction.Down : Direction.Up;
+        }
+      } else {
+        // First align Y with entrance center, then move X through
+        if (absDy > 1) {
+          moveDir = dy > 0 ? Direction.Down : Direction.Up;
+        } else {
+          moveDir = dx > 0 ? Direction.Right : Direction.Left;
+        }
+      }
+
+      // If the chosen direction is blocked, try the other axis
+      if (wouldBeBlocked(gameState, ai.x, ai.y, moveDir)) {
+        const fallback = directionToward(dx, dy);
+        if (!wouldBeBlocked(gameState, ai.x, ai.y, fallback)) {
+          moveDir = fallback;
+        }
+      }
     } else {
       // No longer inside a base — clear locked exit target
       this.exitTarget = null;

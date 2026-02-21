@@ -6,6 +6,7 @@ import {
   BASE_SIZE, TANK_SIZE,
   CANVAS_WIDTH, CANVAS_HEIGHT,
   KILLS_TO_WIN, EXPLOSION_DIG_RADIUS, AI_PLAYER_INDEX,
+  TICK_DURATION_MS,
 } from './constants.js';
 import { markDirtyRect } from './map/TerrainModifier.js';
 import { GameLoop } from './engine/GameLoop.js';
@@ -33,6 +34,8 @@ export class Game {
   private cheatMode = false;
   private cheatKeyWasDown = false;
   private digitKeysDown = [false, false, false, false];
+  private speedKeyWasDown = false;
+  private doubleSpeed = false;
   private paused = false;
   private pauseSelection = 0;
   private escWasDown = false;
@@ -255,6 +258,14 @@ export class Game {
             }
             this.digitKeysDown[i] = down;
           }
+
+          // Cheat: Digit0 toggles double speed
+          const speedDown = this.input.isPressed('Digit0');
+          if (speedDown && !this.speedKeyWasDown) {
+            this.doubleSpeed = !this.doubleSpeed;
+            this.loop.tickDuration = this.doubleSpeed ? TICK_DURATION_MS / 3 : TICK_DURATION_MS;
+          }
+          this.speedKeyWasDown = speedDown;
         }
 
         // Get inputs
