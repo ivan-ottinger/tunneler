@@ -123,9 +123,9 @@ function handleMovement(
     player.energy -= hasDirt ? MOVE_ENERGY_COST : MOVE_EMPTY_ENERGY_COST;
   }
 
-  // Self-destruct if energy depleted — opponent gets the kill
+  // Self-destruct if energy depleted — nearest alive opponent gets the kill
   if (player.energy <= 0) {
-    state.players[1 - playerIndex].score++;
+    creditKillToNearest(state, playerIndex);
     destroyTank(state, player, sound);
   }
 }
@@ -158,24 +158,32 @@ function handleRefueling(
   }
 
   // Enemy base always regens energy (no camp penalty)
-  const enemyBase = state.players[1 - playerIndex].base;
-  if (rectsOverlap(
-    player.x, player.y, TANK_SIZE, TANK_SIZE,
-    enemyBase.x + 1, enemyBase.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
-  )) {
-    player.energy = Math.min(MAX_ENERGY, player.energy + ENEMY_BASE_ENERGY_REGEN);
+  for (let i = 0; i < state.players.length; i++) {
+    if (i === playerIndex) continue;
+    const enemyBase = state.players[i].base;
+    if (rectsOverlap(
+      player.x, player.y, TANK_SIZE, TANK_SIZE,
+      enemyBase.x + 1, enemyBase.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
+    )) {
+      player.energy = Math.min(MAX_ENERGY, player.energy + ENEMY_BASE_ENERGY_REGEN);
+      break;
+    }
   }
 
-  // Neutral outpost — regens like own base, grants one-time bonus on first visit
+  // Outpost: one-time power-up always available, regen only when neutral
   const outpost = state.outpost;
   const inOutpost = rectsOverlap(
     player.x, player.y, TANK_SIZE, TANK_SIZE,
     outpost.x + 1, outpost.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
   );
   if (inOutpost) {
-    player.energy = Math.min(MAX_ENERGY, player.energy + OUTPOST_ENERGY_REGEN);
-    player.shield = Math.min(MAX_SHIELD, player.shield + OUTPOST_SHIELD_REGEN);
+    // Regen only when outpost is neutral; when AI owns it, it's just an enemy base
+    if (outpost.owner === -1) {
+      player.energy = Math.min(MAX_ENERGY, player.energy + OUTPOST_ENERGY_REGEN);
+      player.shield = Math.min(MAX_SHIELD, player.shield + OUTPOST_SHIELD_REGEN);
+    }
 
+    // One-time power-up on first visit regardless of owner
     if (!state.outpostClaimed[playerIndex]) {
       state.outpostClaimed[playerIndex] = true;
       player.bonus = Math.random() < 0.5 ? BonusType.SpeedDig : BonusType.PowerCannon;
@@ -196,17 +204,40 @@ function handleIdleDrain(
     player.x, player.y, TANK_SIZE, TANK_SIZE,
     base.x + 1, base.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
   );
+  // Outpost only exempts from drain when neutral (not owned by AI)
   const outpost = state.outpost;
-  const inOutpost = rectsOverlap(
+  const inNeutralOutpost = outpost.owner === -1 && rectsOverlap(
     player.x, player.y, TANK_SIZE, TANK_SIZE,
     outpost.x + 1, outpost.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
   );
-  if (!inOwnBase && !inOutpost) {
+  if (!inOwnBase && !inNeutralOutpost) {
     player.energy -= IDLE_ENERGY_COST;
     if (player.energy <= 0) {
-      state.players[1 - playerIndex].score++;
+      creditKillToNearest(state, playerIndex);
       destroyTank(state, player, sound);
     }
+  }
+}
+
+/** Credit a self-destruct kill to the nearest alive opponent */
+function creditKillToNearest(state: GameState, playerIndex: number): void {
+  const player = state.players[playerIndex];
+  let bestDist = Infinity;
+  let bestIdx = -1;
+  for (let i = 0; i < state.players.length; i++) {
+    if (i === playerIndex) continue;
+    const other = state.players[i];
+    if (!other.alive) continue;
+    const dx = other.x - player.x;
+    const dy = other.y - player.y;
+    const dist = dx * dx + dy * dy;
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIdx = i;
+    }
+  }
+  if (bestIdx >= 0) {
+    state.players[bestIdx].score++;
   }
 }
 

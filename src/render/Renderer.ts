@@ -46,6 +46,7 @@ export class Renderer {
 
   /** Trigger screen shake for a specific player's viewport */
   addShake(playerIndex: number, intensity: number): void {
+    if (playerIndex >= 2) return; // AI has no viewport
     this.shake[playerIndex] = Math.max(this.shake[playerIndex], intensity);
   }
 
@@ -126,12 +127,15 @@ export class Renderer {
   private paintBaseWalls(state: GameState, ctx: OffscreenCanvasRenderingContext2D): void {
     const entranceOffset = Math.floor((BASE_SIZE - BASE_ENTRANCE_WIDTH) / 2);
 
-    // Player bases + outpost
-    const bases = [
-      { base: state.players[0].base, color: PLAYER_DARK_COLORS[0] },
-      { base: state.players[1].base, color: PLAYER_DARK_COLORS[1] },
-      { base: state.outpost, color: OUTPOST_COLOR },
-    ];
+    // Player bases (including AI if present) + outpost if neutral
+    const bases: { base: import('../types.js').Base; color: string }[] = [];
+    for (let i = 0; i < state.players.length; i++) {
+      bases.push({ base: state.players[i].base, color: PLAYER_DARK_COLORS[i] });
+    }
+    // Only paint outpost separately if it's neutral (not owned by AI)
+    if (state.outpost.owner === -1) {
+      bases.push({ base: state.outpost, color: OUTPOST_COLOR });
+    }
 
     for (const { base, color } of bases) {
       ctx.fillStyle = color;
@@ -190,16 +194,18 @@ export class Renderer {
       if (tile === TileType.BaseWall) {
         // Determine which player/outpost owns this base wall
         let color = TILE_COLORS[tile];
-        for (let p = 0; p < 2; p++) {
+        for (let p = 0; p < state.players.length; p++) {
           const base = state.players[p].base;
           if (x >= base.x && x < base.x + BASE_SIZE && y >= base.y && y < base.y + BASE_SIZE) {
             color = PLAYER_DARK_COLORS[p];
             break;
           }
         }
-        const outpost = state.outpost;
-        if (x >= outpost.x && x < outpost.x + BASE_SIZE && y >= outpost.y && y < outpost.y + BASE_SIZE) {
-          color = OUTPOST_COLOR;
+        if (state.outpost.owner === -1) {
+          const outpost = state.outpost;
+          if (x >= outpost.x && x < outpost.x + BASE_SIZE && y >= outpost.y && y < outpost.y + BASE_SIZE) {
+            color = OUTPOST_COLOR;
+          }
         }
         ctx.fillStyle = color;
       } else if (tile === TileType.Dirt || tile === TileType.DirtVariant) {
@@ -251,7 +257,7 @@ export class Renderer {
     displayCtx.globalCompositeOperation = 'source-over';
 
     // Draw tanks on map overview
-    for (let t = 0; t < 2; t++) {
+    for (let t = 0; t < state.players.length; t++) {
       const tank = state.players[t];
       if (!tank.alive) continue;
       const tx = offsetX + tank.x * scale;
@@ -312,7 +318,7 @@ export class Renderer {
       );
 
       // Dim base walls if player is camping (regen exhausted)
-      for (let t = 0; t < 2; t++) {
+      for (let t = 0; t < state.players.length; t++) {
         const owner = state.players[t];
         if (owner.baseCampTicks <= BASE_CAMP_TIMEOUT) continue;
         const base = owner.base;
@@ -338,7 +344,7 @@ export class Renderer {
       }
 
       // Draw tanks (pulsate if invulnerable)
-      for (let t = 0; t < 2; t++) {
+      for (let t = 0; t < state.players.length; t++) {
         const tank = state.players[t];
         if (!tank.alive) continue;
 
@@ -373,7 +379,7 @@ export class Renderer {
       }
 
       // Draw bullets
-      for (let t = 0; t < 2; t++) {
+      for (let t = 0; t < state.players.length; t++) {
         const bullets = state.players[t].bullets;
         ctx.fillStyle = CGA_PALETTE[15]; // white
         for (const bullet of bullets) {

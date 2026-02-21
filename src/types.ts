@@ -72,6 +72,7 @@ export interface Player {
   bonus: BonusType;
   bullets: Bullet[];
   base: Base;
+  isAI: boolean;
 }
 
 export interface Viewport {
@@ -84,7 +85,7 @@ export interface GameState {
   map: Uint8Array;
   mapWidth: number;
   mapHeight: number;
-  players: [Player, Player];
+  players: Player[];
   viewports: [Viewport, Viewport];
   tickCount: number;
   seed: number;
@@ -92,7 +93,7 @@ export interface GameState {
   dirtyTiles: Set<number>; // indices of tiles changed since last frame
   particles: ExplosionParticle[];
   outpost: Base;
-  outpostClaimed: [boolean, boolean];
+  outpostClaimed: boolean[];
 }
 
 export interface Effect {

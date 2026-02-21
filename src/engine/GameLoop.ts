@@ -5,11 +5,20 @@ export class GameLoop {
   private accumulator = 0;
   private running = false;
   private rafId = 0;
+  private _tickDuration = TICK_DURATION_MS;
 
   constructor(
     private onTick: () => void,
     private onRender: () => void,
   ) {}
+
+  get tickDuration(): number {
+    return this._tickDuration;
+  }
+
+  set tickDuration(ms: number) {
+    this._tickDuration = ms;
+  }
 
   start(): void {
     this.running = true;
@@ -34,13 +43,14 @@ export class GameLoop {
     this.accumulator += delta;
 
     // Cap accumulator to prevent spiral of death
-    if (this.accumulator > TICK_DURATION_MS * 10) {
-      this.accumulator = TICK_DURATION_MS * 10;
+    const td = this._tickDuration;
+    if (this.accumulator > td * 10) {
+      this.accumulator = td * 10;
     }
 
-    while (this.accumulator >= TICK_DURATION_MS) {
+    while (this.accumulator >= td) {
       this.onTick();
-      this.accumulator -= TICK_DURATION_MS;
+      this.accumulator -= td;
     }
 
     this.onRender();
