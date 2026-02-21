@@ -138,7 +138,7 @@ export class Game {
       outpost.owner = AI_PLAYER_INDEX;
       players.push(aiPlayer);
       outpostClaimed.push(false);
-      this.aiController.reset();
+      this.aiController.reset(MAP_WIDTH, MAP_HEIGHT);
     } else {
       // Neutral outpost — no AI
       outpost.owner = -1;

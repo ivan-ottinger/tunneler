@@ -181,16 +181,26 @@ export class AIController {
   private waypointBestDist = Infinity; // closest distance reached to current waypoint
   private waypointStallTicks = 0; // ticks without getting closer to current waypoint
   private wallSide = 0; // wall-follow preference: 0=none, 1=CW, -1=CCW
+  private wallFollowTicks = 0; // how long wall-following has been active
   private ambushTicks = 0; // ticks remaining to hold position near enemy base
   private kiteCooldown = 0; // ticks until next kite shot while retreating
   private discoveredBases = new Set<number>(); // player indices whose bases have been spotted
   private discoveredOutpost = false;
+  private exitTarget: { x: number; y: number } | null = null; // locked entrance target when exiting a base
 
-  reset(): void {
+  reset(mapWidth = 0, mapHeight = 0): void {
     this.state = AIState.Patrol;
     this.path = [];
     this.pathRecalcTimer = 0;
-    this.patrolTarget = null;
+    // Pick an immediate patrol target so the AI starts moving right away
+    if (mapWidth > 0 && mapHeight > 0) {
+      this.patrolTarget = {
+        x: 20 + Math.floor(Math.random() * (mapWidth - 40)),
+        y: 20 + Math.floor(Math.random() * (mapHeight - 40)),
+      };
+    } else {
+      this.patrolTarget = null;
+    }
     this.stuckTicks = 0;
     this.stuckCycles = 0;
     this.progressX = 0;
@@ -202,11 +212,13 @@ export class AIController {
     this.waypointBestDist = Infinity;
     this.waypointStallTicks = 0;
     this.wallSide = 0;
+    this.wallFollowTicks = 0;
     this.ambushTicks = 0;
     this.kiteCooldown = 0;
     this.discoveredBases.clear();
     this.discoveredBases.add(AI_PLAYER_INDEX); // always know own base
     this.discoveredOutpost = false;
+    this.exitTarget = null;
   }
 
   getInput(gameState: GameState): PlayerInput {
@@ -222,12 +234,18 @@ export class AIController {
       this.state = AIState.Patrol;
       this.path = [];
       this.pathRecalcTimer = 0;
-      this.patrolTarget = null;
       this.stuckTicks = 0;
       this.stuckCycles = 0;
       this.waypointBestDist = Infinity;
       this.waypointStallTicks = 0;
       this.wallSide = 0;
+      this.wallFollowTicks = 0;
+      this.exitTarget = null;
+      // Pick an immediate patrol target so the AI moves right away after respawn
+      this.patrolTarget = {
+        x: 20 + Math.floor(Math.random() * (gameState.mapWidth - 40)),
+        y: 20 + Math.floor(Math.random() * (gameState.mapHeight - 40)),
+      };
     }
 
     const cx = ai.x + Math.floor(TANK_SIZE / 2);
@@ -380,81 +398,132 @@ export class AIController {
     // When inside a base, use entrance-aware navigation to avoid getting stuck on walls
     // Exception: stay put when retreating to own base (recharging)
     if (insideAnyBase && !(inOwnBase && this.state === AIState.Retreat)) {
-      let exitDir: Direction;
-      if (inOwnBase) {
-        // Own base: exit toward the ultimate destination for best route
-        let goalX = gameState.mapWidth / 2;
-        let goalY = gameState.mapHeight / 2;
-        if (this.patrolTarget) {
-          goalX = this.patrolTarget.x;
-          goalY = this.patrolTarget.y;
+      // Lock in an exit target to prevent flip-flopping between entrances
+      if (!this.exitTarget) {
+        if (inOwnBase) {
+          // Own base: pick entrance closest to ultimate destination
+          let goalX = gameState.mapWidth / 2;
+          let goalY = gameState.mapHeight / 2;
+          if (this.patrolTarget) {
+            goalX = this.patrolTarget.x;
+            goalY = this.patrolTarget.y;
+          }
+          if (this.state === AIState.Chase && nearestIdx >= 0) {
+            const target = gameState.players[nearestIdx];
+            goalX = target.x + Math.floor(TANK_SIZE / 2);
+            goalY = target.y + Math.floor(TANK_SIZE / 2);
+          }
+          const entrances = getBaseEntrances(insideBaseX, insideBaseY);
+          let best = entrances[0];
+          let bestDist = Infinity;
+          for (const e of entrances) {
+            const dx = e.x - goalX;
+            const dy = e.y - goalY;
+            const d = dx * dx + dy * dy;
+            if (d < bestDist) { bestDist = d; best = e; }
+          }
+          this.exitTarget = best;
+        } else {
+          // Enemy base: pick nearest entrance
+          const half = Math.floor(TANK_SIZE / 2);
+          const entrances = getBaseEntrances(insideBaseX, insideBaseY);
+          let best = entrances[0];
+          let bestDist = Infinity;
+          for (const e of entrances) {
+            const dx = e.x - (ai.x + half);
+            const dy = e.y - (ai.y + half);
+            const d = dx * dx + dy * dy;
+            if (d < bestDist) { bestDist = d; best = e; }
+          }
+          this.exitTarget = best;
         }
-        if (this.state === AIState.Chase && nearestIdx >= 0) {
-          const target = gameState.players[nearestIdx];
-          goalX = target.x + Math.floor(TANK_SIZE / 2);
-          goalY = target.y + Math.floor(TANK_SIZE / 2);
-        }
-        exitDir = getBaseExitTowardGoal(ai.x, ai.y, insideBaseX, insideBaseY, goalX, goalY);
-      } else {
-        // Enemy base: just head for the nearest exit to get out fast
-        exitDir = getBaseExitNearest(ai.x, ai.y, insideBaseX, insideBaseY);
       }
+      const exitDir = directionToward(
+        this.exitTarget.x - (ai.x + Math.floor(TANK_SIZE / 2)),
+        this.exitTarget.y - (ai.y + Math.floor(TANK_SIZE / 2)),
+      );
       const result = findPassableDirection(gameState, ai.x, ai.y, exitDir, this.wallSide);
       moveDir = result.dir;
       this.wallSide = result.wallSide;
-    } else if (this.path.length > 0) {
-      const wp = this.path[0];
-      const dx = wp.x - cx;
-      const dy = wp.y - cy;
-      const distToWp = Math.abs(dx) + Math.abs(dy);
+    } else {
+      // No longer inside a base — clear locked exit target
+      this.exitTarget = null;
 
-      // Track whether we're making progress toward the current waypoint
-      if (distToWp < this.waypointBestDist - 1) {
-        this.waypointBestDist = distToWp;
-        this.waypointStallTicks = 0;
-      } else {
-        this.waypointStallTicks++;
-      }
+      if (this.path.length > 0) {
+        const wp = this.path[0];
+        const dx = wp.x - cx;
+        const dy = wp.y - cy;
+        const distToWp = Math.abs(dx) + Math.abs(dy);
 
-      // If stalled for 8+ ticks (sliding along rock), skip waypoint or force recalc
-      if (this.waypointStallTicks >= 8) {
-        this.waypointStallTicks = 0;
-        this.waypointBestDist = Infinity;
-        this.wallSide = 0;
-        if (this.path.length > 1) {
-          // Skip this waypoint — it's likely behind an obstacle
-          this.path.shift();
+        // Track whether we're making progress toward the current waypoint
+        if (distToWp < this.waypointBestDist - 1) {
+          this.waypointBestDist = distToWp;
+          this.waypointStallTicks = 0;
         } else {
-          // Last waypoint unreachable — force full path recalc with new target
+          this.waypointStallTicks++;
+        }
+
+        // If stalled for 8+ ticks (sliding along rock), skip waypoint or force recalc
+        if (this.waypointStallTicks >= 8) {
+          this.waypointStallTicks = 0;
+          this.waypointBestDist = Infinity;
+          this.wallSide = 0;
+          if (this.path.length > 1) {
+            // Skip this waypoint — it's likely behind an obstacle
+            this.path.shift();
+          } else {
+            // Last waypoint unreachable — force full path recalc with new target
+            this.path = [];
+            this.patrolTarget = null;
+            this.pathRecalcTimer = 0;
+          }
+        }
+
+        // Navigate toward current waypoint
+        if (this.path.length > 0) {
+          const cur = this.path[0];
+          const cdx = cur.x - cx;
+          const cdy = cur.y - cy;
+          if (Math.abs(cdx) < 4 && Math.abs(cdy) < 4) {
+            this.path.shift();
+            this.waypointBestDist = Infinity;
+            this.waypointStallTicks = 0;
+            if (this.path.length > 0) {
+              const next = this.path[0];
+              const idealDir = directionToward(next.x - cx, next.y - cy);
+              const r = findPassableDirection(gameState, ai.x, ai.y, idealDir, this.wallSide);
+              moveDir = r.dir;
+              this.wallSide = r.wallSide;
+            }
+          } else {
+            const idealDir = directionToward(cdx, cdy);
+            const r = findPassableDirection(gameState, ai.x, ai.y, idealDir, this.wallSide);
+            moveDir = r.dir;
+            this.wallSide = r.wallSide;
+          }
+        }
+      }
+    }
+
+    // Wall-follow timeout: detect U-shaped rock traps
+    if (this.wallSide !== 0) {
+      this.wallFollowTicks++;
+      if (this.wallFollowTicks >= 15) {
+        // Stuck in a wall-follow loop — skip waypoint and try a new approach
+        this.wallSide = 0;
+        this.wallFollowTicks = 0;
+        if (this.path.length > 1) {
+          this.path.shift();
+          this.waypointBestDist = Infinity;
+          this.waypointStallTicks = 0;
+        } else {
           this.path = [];
           this.patrolTarget = null;
           this.pathRecalcTimer = 0;
         }
       }
-
-      // Navigate toward current waypoint
-      if (this.path.length > 0) {
-        const cur = this.path[0];
-        const cdx = cur.x - cx;
-        const cdy = cur.y - cy;
-        if (Math.abs(cdx) < 4 && Math.abs(cdy) < 4) {
-          this.path.shift();
-          this.waypointBestDist = Infinity;
-          this.waypointStallTicks = 0;
-          if (this.path.length > 0) {
-            const next = this.path[0];
-            const idealDir = directionToward(next.x - cx, next.y - cy);
-            const r = findPassableDirection(gameState, ai.x, ai.y, idealDir, this.wallSide);
-            moveDir = r.dir;
-            this.wallSide = r.wallSide;
-          }
-        } else {
-          const idealDir = directionToward(cdx, cdy);
-          const r = findPassableDirection(gameState, ai.x, ai.y, idealDir, this.wallSide);
-          moveDir = r.dir;
-          this.wallSide = r.wallSide;
-        }
-      }
+    } else {
+      this.wallFollowTicks = 0;
     }
 
     // Ambush: when patrolling near an enemy base, hold position and wait for targets
