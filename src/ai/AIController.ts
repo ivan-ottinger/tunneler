@@ -162,6 +162,7 @@ export class AIController {
   private discoveredBases = new Set<number>(); // player indices whose bases have been spotted
   private discoveredOutpost = false;
   private exitTarget: { x: number; y: number } | null = null; // locked entrance target when exiting a base
+  private exitBlockedTicks = 0; // how long the chosen exit has been blocked
   /** Locked entrance center + axis when approaching a base from outside (last-mile threading) */
   private entranceTarget: { x: number; y: number; axis: 'v' | 'h' } | null = null;
   /** Last known positions of enemy tanks — updated whenever visible, revisited during patrol */
@@ -198,6 +199,7 @@ export class AIController {
     this.discoveredBases.add(AI_PLAYER_INDEX); // always know own base
     this.discoveredOutpost = false;
     this.exitTarget = null;
+    this.exitBlockedTicks = 0;
     this.entranceTarget = null;
     this.lastSeen.clear();
   }
@@ -312,6 +314,8 @@ export class AIController {
       this.waypointBestDist = Infinity;
       this.waypointStallTicks = 0;
       this.wallSide = 0;
+      this.entranceTarget = null; // allow fresh entrance selection for new path
+      this.exitTarget = null;
     }
 
     // Anti-stuck: detect position not changing
@@ -337,6 +341,16 @@ export class AIController {
     if (this.stuckTicks >= 5) {
       this.stuckTicks = 0;
       this.stuckCycles++;
+
+      // If trying to exit a base, count stuck cycles toward entrance switching
+      if (this.exitTarget) {
+        this.exitBlockedTicks += 5;
+        // If threshold reached, clear exit target so next tick picks a new entrance
+        if (this.exitBlockedTicks >= 4) {
+          this.exitTarget = null;
+          this.exitBlockedTicks = 0;
+        }
+      }
 
       // After 3 stuck cycles without real progress, abandon current goal
       if (this.stuckCycles >= 3) {
@@ -393,22 +407,62 @@ export class AIController {
 
     let moveDir = Direction.None;
 
-    // Check if chase target is inside the same base as the AI
+    // Check if chase target is inside any base, and if inside the same base as the AI
+    let targetInBase = false;
     let targetInSameBase = false;
-    if (insideAnyBase && this.state === AIState.Chase && nearestIdx >= 0 && !inOwnBase) {
+    if (this.state === AIState.Chase && nearestIdx >= 0) {
       const target = gameState.players[nearestIdx];
-      targetInSameBase = rectsOverlap(
-        target.x, target.y, TANK_SIZE, TANK_SIZE,
-        insideBaseX + 1, insideBaseY + 1, BASE_SIZE - 2, BASE_SIZE - 2,
-      );
+      for (let i = 0; i < gameState.players.length; i++) {
+        const b = gameState.players[i].base;
+        if (rectsOverlap(target.x, target.y, TANK_SIZE, TANK_SIZE,
+          b.x + 1, b.y + 1, BASE_SIZE - 2, BASE_SIZE - 2)) {
+          targetInBase = true;
+          if (insideAnyBase && !inOwnBase && b.x === insideBaseX && b.y === insideBaseY) {
+            targetInSameBase = true;
+          }
+          break;
+        }
+      }
+      if (!targetInBase) {
+        const o = gameState.outpost;
+        if (rectsOverlap(target.x, target.y, TANK_SIZE, TANK_SIZE,
+          o.x + 1, o.y + 1, BASE_SIZE - 2, BASE_SIZE - 2)) {
+          targetInBase = true;
+          if (insideAnyBase && o.x === insideBaseX && o.y === insideBaseY) {
+            targetInSameBase = true;
+          }
+        }
+      }
+    }
+
+    // Clear exit target once we've reached it (fully exited the base)
+    if (this.exitTarget && !insideAnyBase) {
+      const half = Math.floor(TANK_SIZE / 2);
+      const etDx = this.exitTarget.x - (ai.x + half);
+      const etDy = this.exitTarget.y - (ai.y + half);
+      if (etDx * etDx + etDy * etDy < 5 * 5) {
+        this.exitTarget = null;
+      }
     }
 
     // When inside a base, use entrance-aware navigation to avoid getting stuck on walls
     // Exceptions: stay put when retreating to own base (recharging),
     //             or move toward target when chasing inside enemy base
-    if (insideAnyBase && !(inOwnBase && this.state === AIState.Retreat) && !targetInSameBase) {
+    // Also continue exit navigation during boundary flicker (briefly detected as outside)
+    const shouldExitBase = insideAnyBase && !(inOwnBase && this.state === AIState.Retreat) && !targetInSameBase;
+    if (shouldExitBase || (!insideAnyBase && this.exitTarget)) {
+      // Invalidate stale exit target from a different base
+      if (this.exitTarget && insideAnyBase) {
+        const baseCx = insideBaseX + Math.floor(BASE_SIZE / 2);
+        const baseCy = insideBaseY + Math.floor(BASE_SIZE / 2);
+        const etDx = this.exitTarget.x - baseCx;
+        const etDy = this.exitTarget.y - baseCy;
+        if (etDx * etDx + etDy * etDy > BASE_SIZE * BASE_SIZE) {
+          this.exitTarget = null;
+        }
+      }
       // Lock in an exit target to prevent flip-flopping between entrances
-      if (!this.exitTarget) {
+      if (!this.exitTarget && insideAnyBase) {
         if (inOwnBase) {
           // Own base: pick entrance closest to ultimate destination
           let goalX = gameState.mapWidth / 2;
@@ -449,6 +503,9 @@ export class AIController {
       }
       // Navigate toward exit using axis-aligned movement to thread narrow entrances.
       // First align with the entrance center on the perpendicular axis, then move through.
+      if (!this.exitTarget) {
+        // exitTarget was cleared (boundary flicker after entrance switch) — skip this tick
+      } else {
       const half = Math.floor(TANK_SIZE / 2);
       const dx = this.exitTarget.x - (ai.x + half);
       const dy = this.exitTarget.y - (ai.y + half);
@@ -483,20 +540,62 @@ export class AIController {
           moveDir = fallback;
         }
       }
-    } else {
-      // No longer inside a base — clear locked exit target
-      this.exitTarget = null;
-      this.entranceTarget = null;
 
-      // When chasing a target inside the same enemy base, move directly toward them
+      // Detect persistently blocked exit — switch to a different entrance.
+      // Only track when aligned and attempting through-movement (not during alignment),
+      // to prevent the counter from resetting on alignment ticks.
+      const isAligning = isVerticalExit ? absDx > 1 : absDy > 1;
+      if (!isAligning && wouldBeBlocked(gameState, ai.x, ai.y, moveDir, AI_PLAYER_INDEX)) {
+        this.exitBlockedTicks++;
+      } else if (!isAligning) {
+        this.exitBlockedTicks = 0;
+      }
+
+      if (this.exitBlockedTicks >= 4) {
+        if (insideAnyBase) {
+          const entrances = getBaseEntrances(insideBaseX, insideBaseY);
+          const alternatives = entrances.filter(e =>
+            Math.abs(e.x - this.exitTarget!.x) > 2 || Math.abs(e.y - this.exitTarget!.y) > 2
+          );
+          this.exitTarget = alternatives.length > 0
+            ? alternatives[Math.floor(Math.random() * alternatives.length)]
+            : entrances[Math.floor(Math.random() * entrances.length)];
+        } else {
+          this.exitTarget = null;
+        }
+        this.exitBlockedTicks = 0;
+      }
+      } // end if (this.exitTarget)
+    } else {
+      // Not exiting a base — clear locked targets
+      this.exitTarget = null;
+      if (this.state !== AIState.Chase) {
+        this.entranceTarget = null;
+      }
+
+      // When chasing a target inside the same enemy base, move directly toward them.
+      // DON'T wall-follow — hold position if blocked. Wall-following inside an enemy
+      // base can deflect the AI back out through the entrance, causing oscillation.
       if (targetInSameBase && nearestIdx >= 0) {
         const target = gameState.players[nearestIdx];
         const tdx = (target.x + Math.floor(TANK_SIZE / 2)) - cx;
         const tdy = (target.y + Math.floor(TANK_SIZE / 2)) - cy;
         const idealDir = directionToward(tdx, tdy);
-        const r = findPassableDirection(gameState, ai.x, ai.y, idealDir, this.wallSide, AI_PLAYER_INDEX);
-        moveDir = r.dir;
-        this.wallSide = r.wallSide;
+        if (idealDir !== Direction.None && !wouldBeBlocked(gameState, ai.x, ai.y, idealDir, AI_PLAYER_INDEX)) {
+          moveDir = idealDir;
+        } else {
+          // Try cardinal components of a diagonal before giving up
+          const cardinals = DIAGONAL_CARDINALS[idealDir];
+          if (cardinals) {
+            for (const c of cardinals) {
+              if (!wouldBeBlocked(gameState, ai.x, ai.y, c, AI_PLAYER_INDEX)) {
+                moveDir = c;
+                break;
+              }
+            }
+          }
+          // If still blocked, hold position and fire (moveDir stays Direction.None)
+        }
       } else if (this.path.length > 0) {
         const wp = this.path[0];
         const dx = wp.x - cx;
@@ -553,8 +652,9 @@ export class AIController {
       }
     }
 
-    // Clear entrance target when we enter the base or leave Chase mode
-    if (this.entranceTarget && (insideAnyBase || this.state !== AIState.Chase)) {
+    // Clear entrance target when leaving Chase mode.
+    // Preserve it when inside a base during Chase to avoid re-selecting on boundary flicker.
+    if (this.entranceTarget && this.state !== AIState.Chase) {
       this.entranceTarget = null;
     }
 
@@ -602,19 +702,43 @@ export class AIController {
       if (this.entranceTarget) {
         const edx = this.entranceTarget.x - cx;
         const edy = this.entranceTarget.y - cy;
-        if (this.entranceTarget.axis === 'v') {
-          moveDir = Math.abs(edx) > 1
-            ? (edx > 0 ? Direction.Right : Direction.Left)
-            : (edy > 0 ? Direction.Down : Direction.Up);
+
+        // When we've reached the entrance, move toward the chase target instead
+        // of oscillating at the exact entrance position where edy/edx ≈ 0.
+        const atEntrance = Math.abs(edx) <= 2 && Math.abs(edy) <= 2;
+        if (atEntrance && nearestIdx >= 0) {
+          const target = gameState.players[nearestIdx];
+          const tdx = (target.x + Math.floor(TANK_SIZE / 2)) - cx;
+          const tdy = (target.y + Math.floor(TANK_SIZE / 2)) - cy;
+          const idealDir = directionToward(tdx, tdy);
+          if (idealDir !== Direction.None && !wouldBeBlocked(gameState, ai.x, ai.y, idealDir, AI_PLAYER_INDEX)) {
+            moveDir = idealDir;
+          } else if (idealDir !== Direction.None) {
+            const cardinals = DIAGONAL_CARDINALS[idealDir];
+            if (cardinals) {
+              for (const c of cardinals) {
+                if (!wouldBeBlocked(gameState, ai.x, ai.y, c, AI_PLAYER_INDEX)) {
+                  moveDir = c;
+                  break;
+                }
+              }
+            }
+          }
         } else {
-          moveDir = Math.abs(edy) > 1
-            ? (edy > 0 ? Direction.Down : Direction.Up)
-            : (edx > 0 ? Direction.Right : Direction.Left);
-        }
-        if (wouldBeBlocked(gameState, ai.x, ai.y, moveDir, AI_PLAYER_INDEX)) {
-          const fallback = directionToward(edx, edy);
-          if (!wouldBeBlocked(gameState, ai.x, ai.y, fallback, AI_PLAYER_INDEX)) {
-            moveDir = fallback;
+          if (this.entranceTarget.axis === 'v') {
+            moveDir = Math.abs(edx) > 1
+              ? (edx > 0 ? Direction.Right : Direction.Left)
+              : (edy > 0 ? Direction.Down : Direction.Up);
+          } else {
+            moveDir = Math.abs(edy) > 1
+              ? (edy > 0 ? Direction.Down : Direction.Up)
+              : (edx > 0 ? Direction.Right : Direction.Left);
+          }
+          if (wouldBeBlocked(gameState, ai.x, ai.y, moveDir, AI_PLAYER_INDEX)) {
+            const fallback = directionToward(edx, edy);
+            if (!wouldBeBlocked(gameState, ai.x, ai.y, fallback, AI_PLAYER_INDEX)) {
+              moveDir = fallback;
+            }
           }
         }
       }
@@ -674,7 +798,36 @@ export class AIController {
       this.kiteCooldown = 12; // ~1.2 seconds between kite shots
     }
 
+    // Face target when in fire range to enable accurate shooting.
+    // Navigation often points moveDir away from the target; override it for combat.
+    // Skip when a base wall separates AI and target (one inside, other outside).
+    if (!kiting && nearestIdx >= 0 && this.state !== AIState.Retreat
+        && ((!insideAnyBase && !targetInBase) || targetInSameBase)) {
+      const target = gameState.players[nearestIdx];
+      const tx = target.x + Math.floor(TANK_SIZE / 2);
+      const ty = target.y + Math.floor(TANK_SIZE / 2);
+      const tdx = tx - cx;
+      const tdy = ty - cy;
+      const dist = Math.sqrt(tdx * tdx + tdy * tdy);
+      const range = this.state === AIState.Chase ? AI_FIRE_RANGE : AI_FIRE_RANGE * 0.5;
+      if (dist < range) {
+        // Lead-target: face where the enemy will be when the bullet arrives
+        const [tvx, tvy] = DIR_DELTA[target.direction];
+        const travelTicks = dist / BULLET_BASE_SPEED;
+        const faceDir = directionToward(
+          tx + tvx * travelTicks - cx,
+          ty + tvy * travelTicks - cy,
+        );
+        if (faceDir !== Direction.None) {
+          moveDir = faceDir;
+        }
+      }
+    }
+
     // Determine firing — lead-target where the enemy will be
+    // Use the direction the tank WILL face (moveDir) rather than the old facing,
+    // since the engine updates direction before firing the bullet.
+    const effectiveFacing = moveDir !== Direction.None ? moveDir : ai.direction;
     let fire = false;
     if (nearestIdx >= 0) {
       const target = gameState.players[nearestIdx];
@@ -694,10 +847,10 @@ export class AIController {
 
       if (kiting) {
         // Kiting: always fire toward the pursuer (use actual direction, not lead)
-        fire = isAligned(ai.direction, tdx, tdy) && Math.random() < AI_FIRE_PROBABILITY;
+        fire = isAligned(effectiveFacing, tdx, tdy) && Math.random() < AI_FIRE_PROBABILITY;
       } else {
         const range = this.state === AIState.Chase ? AI_FIRE_RANGE : AI_FIRE_RANGE * 0.5;
-        if (dist < range && isAligned(ai.direction, leadDx, leadDy)) {
+        if (dist < range && isAligned(effectiveFacing, leadDx, leadDy)) {
           fire = Math.random() < AI_FIRE_PROBABILITY;
         }
       }
