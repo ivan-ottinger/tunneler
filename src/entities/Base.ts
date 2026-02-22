@@ -6,6 +6,7 @@ import { containsRock } from '../map/TerrainModifier.js';
 import { createRng } from '../map/sfc32.js';
 
 const MIN_BASE_DISTANCE = 200;
+const BASE_ROCK_EXCLUSION = 60; // clear rocks this far around each base
 
 /** Place a base anywhere on the map, avoiding rocks and other bases */
 export function placeBase(
@@ -58,6 +59,9 @@ export function placeBase(
     break;
   }
 
+  // Clear rocks in an exclusion zone around the base
+  clearRocksAroundBase(map, mapWidth, mapHeight, bestX, bestY);
+
   // Carve the base structure into the map
   carveBase(map, mapWidth, bestX, bestY);
 
@@ -97,6 +101,38 @@ function carveBase(
         map[idx] = isEntrance ? TileType.BaseInterior : TileType.BaseWall;
       } else {
         map[idx] = TileType.BaseInterior;
+      }
+    }
+  }
+}
+
+/** Clear all rocks within the exclusion zone around a base */
+function clearRocksAroundBase(
+  map: Uint8Array,
+  mapWidth: number,
+  mapHeight: number,
+  bx: number,
+  by: number,
+): void {
+  const cx = bx + BASE_SIZE / 2;
+  const cy = by + BASE_SIZE / 2;
+  const r = BASE_ROCK_EXCLUSION;
+  const r2 = r * r;
+
+  const startX = Math.max(MAP_BORDER, Math.floor(cx - r));
+  const endX = Math.min(mapWidth - MAP_BORDER - 1, Math.ceil(cx + r));
+  const startY = Math.max(MAP_BORDER, Math.floor(cy - r));
+  const endY = Math.min(mapHeight - MAP_BORDER - 1, Math.ceil(cy + r));
+
+  for (let y = startY; y <= endY; y++) {
+    for (let x = startX; x <= endX; x++) {
+      const dx = x - cx;
+      const dy = y - cy;
+      if (dx * dx + dy * dy <= r2) {
+        const idx = y * mapWidth + x;
+        if (map[idx] === TileType.Rock) {
+          map[idx] = TileType.Dirt;
+        }
       }
     }
   }
