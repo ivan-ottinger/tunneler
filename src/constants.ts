@@ -171,10 +171,10 @@ export const P2_ALT_KEYS = {
 } as const;
 
 // Noise generation parameters
-export const ROCK_FREQUENCY = 0.015;
-export const ROCK_THRESHOLD = 0.55;
+export const ROCK_FREQUENCY = 0.008;
+export const ROCK_THRESHOLD = 0.62;
 export const CAVE_FREQUENCY = 0.04;
-export const CAVE_THRESHOLD = 0.6;
+export const CAVE_THRESHOLD = 0.72;
 export const DIRT_VARIANT_FREQUENCY = 0.1;
 export const DIRT_VARIANT_THRESHOLD = 0.3;
 
