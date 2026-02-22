@@ -70,6 +70,16 @@ function handleMovement(
     return;
   }
 
+  // Tank-to-tank collision check
+  for (let i = 0; i < state.players.length; i++) {
+    if (i === playerIndex) continue;
+    const other = state.players[i];
+    if (!other.alive) continue;
+    if (rectsOverlap(newX, newY, TANK_SIZE, TANK_SIZE, other.x, other.y, TANK_SIZE, TANK_SIZE)) {
+      return;
+    }
+  }
+
   // Check for dirt — dig through it
   let hasDirt = false;
   for (let ty = 0; ty < TANK_SIZE; ty++) {
