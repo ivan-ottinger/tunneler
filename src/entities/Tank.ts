@@ -133,9 +133,9 @@ function handleMovement(
     player.energy -= hasDirt ? MOVE_ENERGY_COST : MOVE_EMPTY_ENERGY_COST;
   }
 
-  // Self-destruct if energy depleted — nearest alive opponent gets the kill
+  // Self-destruct if energy depleted — player loses a point
   if (player.energy <= 0) {
-    creditKillToNearest(state, playerIndex);
+    player.score = Math.max(0, player.score - 1);
     destroyTank(state, player, sound);
   }
 }
@@ -223,33 +223,12 @@ function handleIdleDrain(
   if (!inOwnBase && !inNeutralOutpost) {
     player.energy -= IDLE_ENERGY_COST;
     if (player.energy <= 0) {
-      creditKillToNearest(state, playerIndex);
+      player.score = Math.max(0, player.score - 1);
       destroyTank(state, player, sound);
     }
   }
 }
 
-/** Credit a self-destruct kill to the nearest alive opponent */
-function creditKillToNearest(state: GameState, playerIndex: number): void {
-  const player = state.players[playerIndex];
-  let bestDist = Infinity;
-  let bestIdx = -1;
-  for (let i = 0; i < state.players.length; i++) {
-    if (i === playerIndex) continue;
-    const other = state.players[i];
-    if (!other.alive) continue;
-    const dx = other.x - player.x;
-    const dy = other.y - player.y;
-    const dist = dx * dx + dy * dy;
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestIdx = i;
-    }
-  }
-  if (bestIdx >= 0) {
-    state.players[bestIdx].score++;
-  }
-}
 
 function handleRespawn(state: GameState, playerIndex: number): void {
   const player = state.players[playerIndex];
