@@ -2,7 +2,7 @@ import { BonusType, GameState, RenderContext } from '../types.js';
 import {
   CGA_PALETTE, MAX_ENERGY, MAX_SHIELD,
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT, CANVAS_WIDTH, HUD_HEIGHT,
-  KILLS_TO_WIN, PLAYER_COLORS, BASE_CAMP_TIMEOUT, AI_PLAYER_INDEX,
+  KILLS_TO_WIN, PLAYER_COLORS, PLAYER_DARK_COLORS, BASE_CAMP_TIMEOUT, AI_PLAYER_INDEX,
 } from '../constants.js';
 import { drawBitmapText } from './BitmapFont.js';
 
@@ -56,13 +56,12 @@ export function drawStatusPanel(
   }
 
   const colW = Math.floor(CANVAS_WIDTH / playerCount);
-  const barW = 20;
   const barH = 3;
 
   for (let col = 0; col < displayOrder.length; col++) {
     const p = displayOrder[col];
     const player = state.players[p];
-    const playerColor = PLAYER_COLORS[p];
+    const playerColor = PLAYER_DARK_COLORS[p];
     const colX = col * colW;
 
     // Player label
@@ -80,8 +79,9 @@ export function drawStatusPanel(
       ctx.fillRect(scoreX + s * 3, scoreY, 2, 3);
     }
 
-    // Energy bar
-    const barX = colX + colW - barW - 1;
+    // Energy bar — fill remaining column width
+    const barX = scoreX + KILLS_TO_WIN * 3 + 1;
+    const barW = colX + colW - barX - 1;
     const energyY = hudY + 2;
     const regenDead = player.baseCampTicks > BASE_CAMP_TIMEOUT;
     const flash = regenDead && (state.tickCount % 6 < 3);
