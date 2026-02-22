@@ -269,10 +269,11 @@ export class Game {
           this.speedKeyWasDown = speedDown;
         }
 
-        // Debug snapshot with Q key (edge-triggered)
+        // Debug snapshot with Q key (edge-triggered, cheat mode only)
         const qDown = this.input.isPressed('KeyQ');
-        if (qDown && !this.debugKeyWasDown) {
+        if (qDown && !this.debugKeyWasDown && this.cheatMode) {
           this.dumpDebugSnapshot();
+          this.sound.playSnapshot();
         }
         this.debugKeyWasDown = qDown;
 
