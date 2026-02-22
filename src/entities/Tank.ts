@@ -220,7 +220,20 @@ function handleIdleDrain(
     player.x, player.y, TANK_SIZE, TANK_SIZE,
     outpost.x + 1, outpost.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
   );
-  if (!inOwnBase && !inNeutralOutpost) {
+  // Enemy bases also exempt from drain (they regen at a lower rate instead)
+  let inEnemyBase = false;
+  for (let i = 0; i < state.players.length; i++) {
+    if (i === playerIndex) continue;
+    const enemyBase = state.players[i].base;
+    if (rectsOverlap(
+      player.x, player.y, TANK_SIZE, TANK_SIZE,
+      enemyBase.x + 1, enemyBase.y + 1, BASE_SIZE - 2, BASE_SIZE - 2,
+    )) {
+      inEnemyBase = true;
+      break;
+    }
+  }
+  if (!inOwnBase && !inNeutralOutpost && !inEnemyBase) {
     player.energy -= IDLE_ENERGY_COST;
     if (player.energy <= 0) {
       player.score = Math.max(0, player.score - 1);
