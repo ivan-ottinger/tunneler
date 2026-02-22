@@ -159,6 +159,10 @@ export class AIController {
   private wallFollowTicks = 0; // how long wall-following has been active
   private ambushTicks = 0; // ticks remaining to hold position near enemy base
   private kiteCooldown = 0; // ticks until next kite shot while retreating
+  private zigzagTimer = 0;
+  private zigzagDir = 1;    // +1 = CW offset, -1 = CCW offset
+  private dodgeCooldown = 0;
+  private activeDodgeDir = Direction.None; // committed dodge direction
   private discoveredBases = new Set<number>(); // player indices whose bases have been spotted
   private discoveredOutpost = false;
   private exitTarget: { x: number; y: number } | null = null; // locked entrance target when exiting a base
@@ -195,6 +199,10 @@ export class AIController {
     this.wallFollowTicks = 0;
     this.ambushTicks = 0;
     this.kiteCooldown = 0;
+    this.zigzagTimer = 0;
+    this.zigzagDir = 1;
+    this.dodgeCooldown = 0;
+    this.activeDodgeDir = Direction.None;
     this.discoveredBases.clear();
     this.discoveredBases.add(AI_PLAYER_INDEX); // always know own base
     this.discoveredOutpost = false;
@@ -216,6 +224,10 @@ export class AIController {
       patrolTarget: this.patrolTarget,
       ambushTicks: this.ambushTicks,
       kiteCooldown: this.kiteCooldown,
+      zigzagTimer: this.zigzagTimer,
+      zigzagDir: this.zigzagDir,
+      dodgeCooldown: this.dodgeCooldown,
+      activeDodgeDir: this.activeDodgeDir,
       wallSide: this.wallSide,
       wallFollowTicks: this.wallFollowTicks,
       waypointStallTicks: this.waypointStallTicks,
@@ -247,6 +259,10 @@ export class AIController {
       this.wallFollowTicks = 0;
       this.exitTarget = null;
       this.entranceTarget = null;
+      this.zigzagTimer = 0;
+      this.zigzagDir = 1;
+      this.dodgeCooldown = 0;
+      this.activeDodgeDir = Direction.None;
       // Pick an immediate patrol target so the AI moves right away after respawn
       this.patrolTarget = {
         x: 20 + Math.floor(Math.random() * (gameState.mapWidth - 40)),
@@ -810,13 +826,117 @@ export class AIController {
       }
     }
 
+    // --- Bullet dodge during retreat ---
+    // Dodge commits to a direction for several ticks so the tank actually clears the bullet path
+    let dodging = false;
+    if (this.dodgeCooldown > 0) {
+      this.dodgeCooldown--;
+      // Continue committed dodge
+      if (this.activeDodgeDir !== Direction.None
+          && !wouldBeBlocked(gameState, ai.x, ai.y, this.activeDodgeDir, AI_PLAYER_INDEX)) {
+        moveDir = this.activeDodgeDir;
+        dodging = true;
+      } else {
+        // Blocked — abort dodge early
+        this.dodgeCooldown = 0;
+        this.activeDodgeDir = Direction.None;
+      }
+    } else if (this.state === AIState.Retreat && nearestIdx >= 0 && moveDir !== Direction.None) {
+      const bulletSpeed = BULLET_BASE_SPEED;
+      for (let i = 0; i < gameState.players.length; i++) {
+        if (i === AI_PLAYER_INDEX) continue;
+        for (const bullet of gameState.players[i].bullets) {
+          const [bdx, bdy] = DIR_DELTA[bullet.direction];
+          if (bdx === 0 && bdy === 0) continue;
+
+          // Ignore bullets far away (>50px) — not an immediate threat
+          const bvx = bullet.x - cx;
+          const bvy = bullet.y - cy;
+          if (bvx * bvx + bvy * bvy > 50 * 50) continue;
+
+          // Speed-adjusted direction vector per tick
+          const sdx = bdx * bulletSpeed;
+          const sdy = bdy * bulletSpeed;
+
+          // Vector from bullet to AI center
+          const vx = cx - bullet.x;
+          const vy = cy - bullet.y;
+
+          // Time of closest approach (in ticks)
+          const lenSq = sdx * sdx + sdy * sdy;
+          const t = (vx * sdx + vy * sdy) / lenSq;
+          if (t < 1 || t > 12) continue; // moving away, too close to react, or too far out
+
+          // Distance at closest approach
+          const closestX = bullet.x + sdx * t - cx;
+          const closestY = bullet.y + sdy * t - cy;
+          if (closestX * closestX + closestY * closestY >= 7 * 7) continue;
+
+          // Threat detected — dodge perpendicular to bullet travel
+          const perp1 = directionToward(-bdy, bdx);
+          const perp2 = directionToward(bdy, -bdx);
+
+          // Prefer the perpendicular closer to our retreat path
+          let dodgeDir = perp1;
+          if (perp1 !== Direction.None && perp2 !== Direction.None) {
+            const [mx, my] = DIR_DELTA[moveDir];
+            const [p1x, p1y] = DIR_DELTA[perp1];
+            const [p2x, p2y] = DIR_DELTA[perp2];
+            if (p2x * mx + p2y * my > p1x * mx + p1y * my) dodgeDir = perp2;
+          }
+
+          if (dodgeDir !== Direction.None && !wouldBeBlocked(gameState, ai.x, ai.y, dodgeDir, AI_PLAYER_INDEX)) {
+            moveDir = dodgeDir;
+            this.activeDodgeDir = dodgeDir;
+            this.dodgeCooldown = 8; // commit to dodging for 8 ticks (~8px lateral)
+            dodging = true;
+          } else {
+            const other = dodgeDir === perp1 ? perp2 : perp1;
+            if (other !== Direction.None && !wouldBeBlocked(gameState, ai.x, ai.y, other, AI_PLAYER_INDEX)) {
+              moveDir = other;
+              this.activeDodgeDir = other;
+              this.dodgeCooldown = 5;
+              dodging = true;
+            }
+          }
+          break;
+        }
+        if (dodging) break;
+      }
+    }
+
+    // --- Zigzag evasion during retreat ---
+    if (this.state === AIState.Retreat && nearestIdx >= 0) {
+      this.zigzagTimer++;
+      if (!dodging && moveDir !== Direction.None) {
+        // Jink for 2 ticks every 8-tick cycle, alternate sides each cycle
+        const phase = this.zigzagTimer % 8;
+        if (phase === 0) this.zigzagDir *= -1;
+        if (phase < 2) {
+          const idx = dirIndex(moveDir);
+          if (idx >= 0) {
+            const offsetDir = ALL_DIRS[(idx + this.zigzagDir + 8) % 8];
+            if (!wouldBeBlocked(gameState, ai.x, ai.y, offsetDir, AI_PLAYER_INDEX)) {
+              moveDir = offsetDir;
+            }
+          }
+        }
+      }
+    } else {
+      this.zigzagTimer = 0;
+    }
+
     // Kiting: when retreating with a pursuer nearby, periodically stop and fire
     this.kiteCooldown = Math.max(0, this.kiteCooldown - 1);
     let kiting = false;
     if (this.state === AIState.Retreat && nearestIdx >= 0 && nearestDist < AI_DETECT_RANGE && this.kiteCooldown === 0) {
-      // Stop for 1 tick and take a shot
+      // Turn to face the enemy and fire — moves 1px toward them but ensures the shot lands
       kiting = true;
-      moveDir = Direction.None;
+      const target = gameState.players[nearestIdx];
+      const tdx = (target.x + Math.floor(TANK_SIZE / 2)) - cx;
+      const tdy = (target.y + Math.floor(TANK_SIZE / 2)) - cy;
+      const faceDir = directionToward(tdx, tdy);
+      moveDir = faceDir !== Direction.None ? faceDir : Direction.None;
       this.kiteCooldown = 12; // ~1.2 seconds between kite shots
     }
 
