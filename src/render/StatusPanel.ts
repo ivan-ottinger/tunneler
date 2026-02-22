@@ -1,10 +1,10 @@
 import { BonusType, GameState, RenderContext } from '../types.js';
 import {
   CGA_PALETTE, MAX_ENERGY, MAX_SHIELD,
-  VIEWPORT_WIDTH, STATUS_PANEL_WIDTH, VIEWPORT_HEIGHT,
-  KILLS_TO_WIN, PLAYER_COLORS, BASE_CAMP_TIMEOUT,
+  VIEWPORT_WIDTH, VIEWPORT_HEIGHT, CANVAS_WIDTH, HUD_HEIGHT,
+  KILLS_TO_WIN, PLAYER_COLORS, BASE_CAMP_TIMEOUT, AI_PLAYER_INDEX,
 } from '../constants.js';
-import { drawBitmapText, drawBitmapTextCentered } from './BitmapFont.js';
+import { drawBitmapText } from './BitmapFont.js';
 
 function drawBar(
   ctx: RenderContext,
@@ -29,74 +29,72 @@ function drawBar(
   ctx.fillRect(x + 1, y + 1, fillW, innerH);
 }
 
-/** Draw the center status panel on the offscreen canvas */
+/** Draw the horizontal HUD strip below the viewports */
 export function drawStatusPanel(
   ctx: RenderContext,
   state: GameState,
 ): void {
-  const panelX = VIEWPORT_WIDTH;
-  const panelW = STATUS_PANEL_WIDTH;
-  const panelCx = panelX + Math.floor(panelW / 2);
+  const hudY = VIEWPORT_HEIGHT;
   const playerCount = state.players.length;
 
   // Background
   ctx.fillStyle = CGA_PALETTE[0];
-  ctx.fillRect(panelX, 0, panelW, VIEWPORT_HEIGHT);
+  ctx.fillRect(0, hudY, CANVAS_WIDTH, HUD_HEIGHT);
 
-  // Border lines
+  // Top border
   ctx.fillStyle = CGA_PALETTE[8];
-  ctx.fillRect(panelX, 0, 1, VIEWPORT_HEIGHT);
-  ctx.fillRect(panelX + panelW - 1, 0, 1, VIEWPORT_HEIGHT);
+  ctx.fillRect(0, hudY, CANVAS_WIDTH, 1);
 
-  const barX = panelX + 3;
-  const barW = panelW - 6;
+  // Display order: P1 (left), AI (center), P2 (right)
+  const displayOrder: number[] = [];
+  for (let i = 0; i < playerCount; i++) {
+    if (i !== AI_PLAYER_INDEX) displayOrder.push(i);
+  }
+  // Insert AI in the middle
+  if (AI_PLAYER_INDEX < playerCount) {
+    displayOrder.splice(1, 0, AI_PLAYER_INDEX);
+  }
 
-  // Use compact layout when 3+ players
-  const compact = playerCount > 2;
-  const sectionH = Math.floor(VIEWPORT_HEIGHT / playerCount);
-  const barH = compact ? 3 : 5;
+  const colW = Math.floor(CANVAS_WIDTH / playerCount);
+  const barW = 20;
+  const barH = 3;
 
-  for (let p = 0; p < playerCount; p++) {
+  for (let col = 0; col < displayOrder.length; col++) {
+    const p = displayOrder[col];
     const player = state.players[p];
     const playerColor = PLAYER_COLORS[p];
-    const yBase = p * sectionH + 1;
+    const colX = col * colW;
 
     // Player label
     const label = player.isAI ? 'AI' : `P${p + 1}`;
-    drawBitmapTextCentered(ctx, label, panelCx, yBase, playerColor, 1);
+    const labelX = colX + 2;
+    const labelY = hudY + 2;
+    drawBitmapText(ctx, label, labelX, labelY, playerColor, 1);
 
-    // Score ticks
-    const scoreY = yBase + 6;
+    // Score ticks right after label
+    const labelW = label.length * 4;
+    const scoreX = labelX + labelW + 1;
+    const scoreY = labelY + 1;
     for (let s = 0; s < KILLS_TO_WIN; s++) {
       ctx.fillStyle = s < player.score ? playerColor : CGA_PALETTE[8];
-      const tickW = Math.floor(barW / KILLS_TO_WIN);
-      ctx.fillRect(barX + s * (tickW + 1), scoreY, tickW, 2);
+      ctx.fillRect(scoreX + s * 3, scoreY, 2, 3);
     }
 
     // Energy bar
-    const energyY = scoreY + (compact ? 3 : 5);
+    const barX = colX + colW - barW - 1;
+    const energyY = hudY + 2;
     const regenDead = player.baseCampTicks > BASE_CAMP_TIMEOUT;
     const flash = regenDead && (state.tickCount % 6 < 3);
     const eColor = flash ? CGA_PALETTE[12] : CGA_PALETTE[3];
-    if (!compact) {
-      drawBitmapText(ctx, 'E', barX, energyY, eColor, 1);
-      drawBar(ctx, barX + 5, energyY, barW - 5, barH, player.energy, MAX_ENERGY, eColor, CGA_PALETTE[7]);
-    } else {
-      drawBar(ctx, barX, energyY, barW, barH, player.energy, MAX_ENERGY, eColor, CGA_PALETTE[7]);
-    }
+    drawBar(ctx, barX, energyY, barW, barH, player.energy, MAX_ENERGY, eColor, CGA_PALETTE[7]);
 
-    // Health bar
-    const healthY = energyY + barH + 1;
-    if (!compact) {
-      drawBitmapText(ctx, 'H', barX, healthY, CGA_PALETTE[12], 1);
-      drawBar(ctx, barX + 5, healthY, barW - 5, barH, player.shield, MAX_SHIELD, CGA_PALETTE[12], CGA_PALETTE[7]);
-    } else {
-      drawBar(ctx, barX, healthY, barW, barH, player.shield, MAX_SHIELD, CGA_PALETTE[12], CGA_PALETTE[7]);
-    }
+    // Shield bar
+    const shieldY = energyY + barH + 1;
+    drawBar(ctx, barX, shieldY, barW, barH, player.shield, MAX_SHIELD, CGA_PALETTE[12], CGA_PALETTE[7]);
 
-    // Bonus indicator (skip for AI)
+    // Bonus indicator below label (human players only)
     if (!player.isAI && player.bonus !== BonusType.None) {
-      const bonusY = healthY + barH + 1;
+      const bonusY = hudY + 9;
       const bonusLabels: Record<number, string> = {
         [BonusType.SpeedDig]: 'DIG',
         [BonusType.PowerCannon]: 'PWR',
@@ -109,14 +107,13 @@ export function drawStatusPanel(
         [BonusType.ScatterShot]: CGA_PALETTE[14],
         [BonusType.WideBore]: CGA_PALETTE[11],
       };
-      drawBitmapTextCentered(ctx, bonusLabels[player.bonus] ?? '', panelCx, bonusY, bonusColors[player.bonus] ?? CGA_PALETTE[15], 1);
+      drawBitmapText(ctx, bonusLabels[player.bonus] ?? '', labelX, bonusY, bonusColors[player.bonus] ?? CGA_PALETTE[15], 1);
     }
 
-    // Divider after each section except the last
-    if (p < playerCount - 1) {
+    // Column divider (except after last)
+    if (col < displayOrder.length - 1) {
       ctx.fillStyle = CGA_PALETTE[8];
-      const divY = (p + 1) * sectionH;
-      ctx.fillRect(panelX + 2, divY, panelW - 4, 1);
+      ctx.fillRect(colX + colW, hudY + 1, 1, HUD_HEIGHT - 1);
     }
   }
 }

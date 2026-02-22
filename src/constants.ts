@@ -92,11 +92,11 @@ export const TICK_DURATION_MS = 100;
 
 // Rendering
 export const RENDER_SCALE = 8;
-export const VIEWPORT_WIDTH = 76;
+export const VIEWPORT_WIDTH = 88;
 export const VIEWPORT_HEIGHT = 72;
-export const STATUS_PANEL_WIDTH = 24; // in native pixels (192px rendered)
-export const CANVAS_WIDTH = VIEWPORT_WIDTH * 2 + STATUS_PANEL_WIDTH;
-export const CANVAS_HEIGHT = VIEWPORT_HEIGHT;
+export const HUD_HEIGHT = 14;
+export const CANVAS_WIDTH = VIEWPORT_WIDTH * 2;
+export const CANVAS_HEIGHT = VIEWPORT_HEIGHT + HUD_HEIGHT;
 
 // Tile colors
 export const TILE_COLORS: Record<TileType, string> = {
