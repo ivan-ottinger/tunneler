@@ -46,7 +46,7 @@ function dirIndex(d: Direction): number {
 }
 
 /** Check if a tank at (x,y) moving in direction d would be blocked */
-function wouldBeBlocked(state: GameState, x: number, y: number, d: Direction): boolean {
+function wouldBeBlocked(state: GameState, x: number, y: number, d: Direction, playerIndex: number): boolean {
   const [ddx, ddy] = DIR_DELTA[d];
   const nx = x + ddx;
   const ny = y + ddy;
@@ -56,6 +56,13 @@ function wouldBeBlocked(state: GameState, x: number, y: number, d: Direction): b
       const tile = state.map[(ny + ty) * state.mapWidth + (nx + tx)];
       if (tile === TileType.Rock || tile === TileType.BaseWall) return true;
     }
+  }
+  // Tank-to-tank collision check
+  for (let i = 0; i < state.players.length; i++) {
+    if (i === playerIndex) continue;
+    const other = state.players[i];
+    if (!other.alive) continue;
+    if (rectsOverlap(nx, ny, TANK_SIZE, TANK_SIZE, other.x, other.y, TANK_SIZE, TANK_SIZE)) return true;
   }
   return false;
 }
@@ -75,10 +82,10 @@ const DIAGONAL_CARDINALS: Partial<Record<Direction, [Direction, Direction]>> = {
 };
 
 /** Try the ideal direction, then rotations biased by wallSide preference for consistent wall-following. */
-function findPassableDirection(state: GameState, x: number, y: number, ideal: Direction, wallSide: number): DirResult {
+function findPassableDirection(state: GameState, x: number, y: number, ideal: Direction, wallSide: number, playerIndex: number): DirResult {
   if (ideal === Direction.None) return { dir: Direction.None, wallSide: 0 };
   // Try ideal first — if it works, obstacle is cleared
-  if (!wouldBeBlocked(state, x, y, ideal)) return { dir: ideal, wallSide: 0 };
+  if (!wouldBeBlocked(state, x, y, ideal, playerIndex)) return { dir: ideal, wallSide: 0 };
 
   // If the ideal was diagonal and blocked, try each cardinal component first.
   // This naturally threads narrow passages (e.g., base entrances) where the
@@ -86,7 +93,7 @@ function findPassableDirection(state: GameState, x: number, y: number, ideal: Di
   const cardinals = DIAGONAL_CARDINALS[ideal];
   if (cardinals) {
     for (const c of cardinals) {
-      if (!wouldBeBlocked(state, x, y, c)) return { dir: c, wallSide: 0 };
+      if (!wouldBeBlocked(state, x, y, c, playerIndex)) return { dir: c, wallSide: 0 };
     }
   }
 
@@ -97,21 +104,21 @@ function findPassableDirection(state: GameState, x: number, y: number, ideal: Di
   if (wallSide !== 0) {
     for (let step = 1; step <= 4; step++) {
       const d = ALL_DIRS[(idx + wallSide * step + 8) % 8];
-      if (!wouldBeBlocked(state, x, y, d)) return { dir: d, wallSide };
+      if (!wouldBeBlocked(state, x, y, d, playerIndex)) return { dir: d, wallSide };
     }
     // Preferred side fully blocked — try the other side
     const other = -wallSide;
     for (let step = 1; step <= 4; step++) {
       const d = ALL_DIRS[(idx + other * step + 8) % 8];
-      if (!wouldBeBlocked(state, x, y, d)) return { dir: d, wallSide: other };
+      if (!wouldBeBlocked(state, x, y, d, playerIndex)) return { dir: d, wallSide: other };
     }
   } else {
     // No preference yet — try closest rotation on each side, pick the nearest passable
     for (let step = 1; step <= 4; step++) {
       const cw = ALL_DIRS[(idx + step + 8) % 8];
-      if (!wouldBeBlocked(state, x, y, cw)) return { dir: cw, wallSide: 1 };
+      if (!wouldBeBlocked(state, x, y, cw, playerIndex)) return { dir: cw, wallSide: 1 };
       const ccw = ALL_DIRS[(idx - step + 8) % 8];
-      if (!wouldBeBlocked(state, x, y, ccw)) return { dir: ccw, wallSide: -1 };
+      if (!wouldBeBlocked(state, x, y, ccw, playerIndex)) return { dir: ccw, wallSide: -1 };
     }
   }
 
@@ -346,7 +353,7 @@ export class AIController {
       // Pick a random passable direction to break free (prefer reversing)
       const shuffled = [...ALL_DIRS].sort(() => Math.random() - 0.5);
       for (const d of shuffled) {
-        if (!wouldBeBlocked(gameState, ai.x, ai.y, d)) {
+        if (!wouldBeBlocked(gameState, ai.x, ai.y, d, AI_PLAYER_INDEX)) {
           return { direction: d, fire: false };
         }
       }
@@ -470,9 +477,9 @@ export class AIController {
       }
 
       // If the chosen direction is blocked, try the other axis
-      if (wouldBeBlocked(gameState, ai.x, ai.y, moveDir)) {
+      if (wouldBeBlocked(gameState, ai.x, ai.y, moveDir, AI_PLAYER_INDEX)) {
         const fallback = directionToward(dx, dy);
-        if (!wouldBeBlocked(gameState, ai.x, ai.y, fallback)) {
+        if (!wouldBeBlocked(gameState, ai.x, ai.y, fallback, AI_PLAYER_INDEX)) {
           moveDir = fallback;
         }
       }
@@ -487,7 +494,7 @@ export class AIController {
         const tdx = (target.x + Math.floor(TANK_SIZE / 2)) - cx;
         const tdy = (target.y + Math.floor(TANK_SIZE / 2)) - cy;
         const idealDir = directionToward(tdx, tdy);
-        const r = findPassableDirection(gameState, ai.x, ai.y, idealDir, this.wallSide);
+        const r = findPassableDirection(gameState, ai.x, ai.y, idealDir, this.wallSide, AI_PLAYER_INDEX);
         moveDir = r.dir;
         this.wallSide = r.wallSide;
       } else if (this.path.length > 0) {
@@ -532,13 +539,13 @@ export class AIController {
             if (this.path.length > 0) {
               const next = this.path[0];
               const idealDir = directionToward(next.x - cx, next.y - cy);
-              const r = findPassableDirection(gameState, ai.x, ai.y, idealDir, this.wallSide);
+              const r = findPassableDirection(gameState, ai.x, ai.y, idealDir, this.wallSide, AI_PLAYER_INDEX);
               moveDir = r.dir;
               this.wallSide = r.wallSide;
             }
           } else {
             const idealDir = directionToward(cdx, cdy);
-            const r = findPassableDirection(gameState, ai.x, ai.y, idealDir, this.wallSide);
+            const r = findPassableDirection(gameState, ai.x, ai.y, idealDir, this.wallSide, AI_PLAYER_INDEX);
             moveDir = r.dir;
             this.wallSide = r.wallSide;
           }
@@ -604,9 +611,9 @@ export class AIController {
             ? (edy > 0 ? Direction.Down : Direction.Up)
             : (edx > 0 ? Direction.Right : Direction.Left);
         }
-        if (wouldBeBlocked(gameState, ai.x, ai.y, moveDir)) {
+        if (wouldBeBlocked(gameState, ai.x, ai.y, moveDir, AI_PLAYER_INDEX)) {
           const fallback = directionToward(edx, edy);
-          if (!wouldBeBlocked(gameState, ai.x, ai.y, fallback)) {
+          if (!wouldBeBlocked(gameState, ai.x, ai.y, fallback, AI_PLAYER_INDEX)) {
             moveDir = fallback;
           }
         }
