@@ -127,7 +127,7 @@ function findPassableDirection(state: GameState, x: number, y: number, ideal: Di
 }
 
 /** Get exit points outside each entrance, far enough that a tank fully clears the base. */
-function getBaseEntrances(baseX: number, baseY: number): { x: number; y: number }[] {
+export function getBaseEntrances(baseX: number, baseY: number): { x: number; y: number }[] {
   const entrOff = Math.floor((BASE_SIZE - BASE_ENTRANCE_WIDTH) / 2);
   const entrMid = entrOff + Math.floor(BASE_ENTRANCE_WIDTH / 2);
   const clearance = TANK_SIZE + 2; // far enough outside so the tank fully exits
@@ -202,6 +202,28 @@ export class AIController {
     this.exitBlockedTicks = 0;
     this.entranceTarget = null;
     this.lastSeen.clear();
+  }
+
+  getDebugState(): Record<string, unknown> {
+    return {
+      state: AIState[this.state],
+      exitTarget: this.exitTarget,
+      entranceTarget: this.entranceTarget,
+      exitBlockedTicks: this.exitBlockedTicks,
+      stuckTicks: this.stuckTicks,
+      stuckCycles: this.stuckCycles,
+      path: this.path,
+      patrolTarget: this.patrolTarget,
+      ambushTicks: this.ambushTicks,
+      kiteCooldown: this.kiteCooldown,
+      wallSide: this.wallSide,
+      wallFollowTicks: this.wallFollowTicks,
+      waypointStallTicks: this.waypointStallTicks,
+      waypointBestDist: this.waypointBestDist,
+      discoveredBases: [...this.discoveredBases],
+      discoveredOutpost: this.discoveredOutpost,
+      lastSeen: Object.fromEntries(this.lastSeen),
+    };
   }
 
   getInput(gameState: GameState): PlayerInput {
@@ -981,41 +1003,10 @@ export class AIController {
         break;
       }
       case AIState.Retreat: {
-        // Find nearest discovered base — own base always known, others require discovery
+        // Always retreat to own base — enemy bases don't recharge
         const half = Math.floor(BASE_SIZE / 2);
-        let bestDist = Infinity;
-        let bestX = ai.base.x + half;
-        let bestY = ai.base.y + half;
-
-        // Check discovered player bases only (fog of war)
-        for (let i = 0; i < gameState.players.length; i++) {
-          if (!this.discoveredBases.has(i)) continue;
-          const p = gameState.players[i];
-          const bx = p.base.x + half;
-          const by = p.base.y + half;
-          const dx = bx - cx;
-          const dy = by - cy;
-          const dist = dx * dx + dy * dy;
-          if (dist < bestDist) {
-            bestDist = dist;
-            bestX = bx;
-            bestY = by;
-          }
-        }
-
-        // Also check neutral outpost if discovered (fog of war)
-        if (gameState.outpost.owner === -1 && this.discoveredOutpost) {
-          const ox = gameState.outpost.x + half;
-          const oy = gameState.outpost.y + half;
-          const dx = ox - cx;
-          const dy = oy - cy;
-          const dist = dx * dx + dy * dy;
-          if (dist < bestDist) {
-            bestX = ox;
-            bestY = oy;
-          }
-        }
-
+        const bestX = ai.base.x + half;
+        const bestY = ai.base.y + half;
         this.path = this.pathfinder.findPath(cx, cy, bestX, bestY);
         break;
       }

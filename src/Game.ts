@@ -20,7 +20,7 @@ import { SoundManager } from './engine/SoundManager.js';
 import { drawTitleScreen } from './ui/TitleScreen.js';
 import { drawGameOverScreen, GAME_OVER_TEXT_HEIGHT } from './ui/GameOverScreen.js';
 import { drawPauseScreen } from './ui/PauseScreen.js';
-import { AIController } from './ai/AIController.js';
+import { AIController, getBaseEntrances } from './ai/AIController.js';
 
 export class Game {
   private state!: GameState;
@@ -44,6 +44,7 @@ export class Game {
   private aiController = new AIController();
   private aiEnabled = true;
   private aiToggleWasDown = false;
+  private debugKeyWasDown = false;
   private uiCanvas: OffscreenCanvas;
   private uiCtx: OffscreenCanvasRenderingContext2D;
 
@@ -268,6 +269,13 @@ export class Game {
           this.speedKeyWasDown = speedDown;
         }
 
+        // Debug snapshot with Q key (edge-triggered)
+        const qDown = this.input.isPressed('KeyQ');
+        if (qDown && !this.debugKeyWasDown) {
+          this.dumpDebugSnapshot();
+        }
+        this.debugKeyWasDown = qDown;
+
         // Get inputs
         const input0 = this.input.getPlayerInput(0);
         const input1 = this.input.getPlayerInput(1);
@@ -393,6 +401,54 @@ export class Game {
     }
 
     state.particles = surviving;
+  }
+
+  private dumpDebugSnapshot(): void {
+    const { state } = this;
+
+    const players = state.players.map((p, i) => ({
+      index: i,
+      position: { x: p.x, y: p.y },
+      direction: p.direction,
+      alive: p.alive,
+      energy: p.energy,
+      shield: p.shield,
+      score: p.score,
+      invulnTicks: p.invulnTicks,
+      digCooldown: p.digCooldown,
+      reloadTimer: p.reloadTimer,
+      bonus: p.bonus,
+      isAI: p.isAI,
+      base: { x: p.base.x, y: p.base.y, owner: p.base.owner },
+      baseEntrances: getBaseEntrances(p.base.x, p.base.y),
+      bullets: p.bullets.map(b => ({ x: b.x, y: b.y, direction: b.direction })),
+    }));
+
+    const snapshot: Record<string, unknown> = {
+      tickCount: state.tickCount,
+      mapWidth: state.mapWidth,
+      mapHeight: state.mapHeight,
+      outpost: {
+        x: state.outpost.x,
+        y: state.outpost.y,
+        owner: state.outpost.owner,
+        entrances: getBaseEntrances(state.outpost.x, state.outpost.y),
+      },
+      players,
+    };
+
+    if (this.aiEnabled && state.players.length > AI_PLAYER_INDEX) {
+      snapshot.aiDebug = this.aiController.getDebugState();
+    }
+
+    const json = JSON.stringify(snapshot, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tunneler-debug-${state.tickCount}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   private blitUI(): void {
