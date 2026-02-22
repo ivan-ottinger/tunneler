@@ -206,6 +206,26 @@ export class SoundManager {
     }
   }
 
+  playSnapshot(): void {
+    const ctx = this.ensureContext();
+    const now = ctx.currentTime;
+
+    // Short click/shutter sound
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(1200, now);
+    osc.frequency.exponentialRampToValueAtTime(600, now + 0.06);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.15, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.08);
+  }
+
   /** Boom when a tank explodes */
   playExplosion(): void {
     const ctx = this.ensureContext();
