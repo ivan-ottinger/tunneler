@@ -62,6 +62,16 @@ export const SCATTER_SPREAD_ANGLE = Math.PI / 12; // ~15° half-angle
 // Wide bore bonus
 export const WIDE_BORE_DIG_SIZE = 9;
 
+// Shield regen bonus
+export const SHIELD_REGEN_RATE = 0.05; // per tick (~1 shield every 2 seconds)
+
+// Bonus spawning
+export const BONUS_INITIAL_SPAWN_DELAY = 100;
+export const BONUS_RESPAWN_DELAY_MIN = 100;
+export const BONUS_RESPAWN_DELAY_MAX = 200;
+export const BONUS_PICKUP_SIZE = 3;
+export const BONUS_SPAWN_BASE_CLEARANCE = 50;
+
 // Bullets
 export const MAX_BULLETS = 10;
 export const RELOAD_TICKS = 1; // 100ms at 100ms ticks

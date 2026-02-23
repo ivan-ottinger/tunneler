@@ -6,7 +6,7 @@ import {
   BASE_SIZE, TANK_SIZE,
   CANVAS_WIDTH, CANVAS_HEIGHT,
   KILLS_TO_WIN, EXPLOSION_DIG_RADIUS, AI_PLAYER_INDEX,
-  TICK_DURATION_MS,
+  TICK_DURATION_MS, BONUS_INITIAL_SPAWN_DELAY,
 } from './constants.js';
 import { markDirtyRect } from './map/TerrainModifier.js';
 import { GameLoop } from './engine/GameLoop.js';
@@ -15,6 +15,7 @@ import { generateMap } from './map/MapGenerator.js';
 import { placeBase } from './entities/Base.js';
 import { updateTank } from './entities/Tank.js';
 import { handleFiring, updateBullets } from './entities/Bullet.js';
+import { updateBonusSpawner, checkBonusPickup } from './entities/BonusSpawner.js';
 import { Renderer } from './render/Renderer.js';
 import { SoundManager } from './engine/SoundManager.js';
 import { drawTitleScreen } from './ui/TitleScreen.js';
@@ -33,7 +34,7 @@ export class Game {
   private mapKeyWasDown = false;
   private cheatMode = false;
   private cheatKeyWasDown = false;
-  private digitKeysDown = [false, false, false, false];
+  private digitKeysDown = [false, false, false, false, false];
   private speedKeyWasDown = false;
   private doubleSpeed = false;
   private paused = false;
@@ -82,7 +83,8 @@ export class Game {
       dirtyTiles: new Set(),
       particles: [],
       outpost: { x: 0, y: 0, owner: -1 },
-      outpostClaimed: [false, false],
+      bonusPickup: null,
+      bonusSpawnTimer: BONUS_INITIAL_SPAWN_DELAY,
     };
     this.paused = false;
   }
@@ -131,7 +133,6 @@ export class Game {
     p1.y = base1.y + Math.floor(BASE_SIZE / 2) - Math.floor(TANK_SIZE / 2);
 
     const players: Player[] = [p0, p1];
-    const outpostClaimed: boolean[] = [false, false];
 
     if (this.aiEnabled) {
       // AI player spawns at the outpost — outpost becomes AI's home base
@@ -141,7 +142,6 @@ export class Game {
       aiPlayer.y = outpost.y + Math.floor(BASE_SIZE / 2) - Math.floor(TANK_SIZE / 2);
       outpost.owner = AI_PLAYER_INDEX;
       players.push(aiPlayer);
-      outpostClaimed.push(false);
       this.aiController.reset(MAP_WIDTH, MAP_HEIGHT);
     } else {
       // Neutral outpost — no AI
@@ -161,7 +161,8 @@ export class Game {
       dirtyTiles: new Set(),
       particles: [],
       outpost,
-      outpostClaimed,
+      bonusPickup: null,
+      bonusSpawnTimer: BONUS_INITIAL_SPAWN_DELAY,
     };
 
     this.matchOverDelay = 0;
@@ -249,9 +250,9 @@ export class Game {
 
         // Cheat: number keys apply bonuses to all players
         if (this.cheatMode) {
-          const bonusKeys = ['Digit1', 'Digit2', 'Digit3', 'Digit4'];
-          const bonusTypes = [BonusType.SpeedDig, BonusType.PowerCannon, BonusType.ScatterShot, BonusType.WideBore];
-          for (let i = 0; i < 4; i++) {
+          const bonusKeys = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'];
+          const bonusTypes = [BonusType.SpeedDig, BonusType.PowerCannon, BonusType.ScatterShot, BonusType.WideBore, BonusType.ShieldRegen];
+          for (let i = 0; i < 5; i++) {
             const down = this.input.isPressed(bonusKeys[i]);
             if (down && !this.digitKeysDown[i]) {
               for (const p of state.players) p.bonus = bonusTypes[i];
@@ -298,6 +299,10 @@ export class Game {
 
         // Update bullets
         updateBullets(state, this.renderer, this.sound);
+
+        // Bonus spawning and pickup
+        updateBonusSpawner(state);
+        checkBonusPickup(state, this.sound);
 
         // Update explosion particles — move outward, dig dirt
         this.updateParticles();
@@ -435,6 +440,8 @@ export class Game {
         owner: state.outpost.owner,
         entrances: getBaseEntrances(state.outpost.x, state.outpost.y),
       },
+      bonusPickup: state.bonusPickup,
+      bonusSpawnTimer: state.bonusSpawnTimer,
       players,
     };
 

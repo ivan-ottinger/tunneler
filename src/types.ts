@@ -4,6 +4,7 @@ export enum BonusType {
   PowerCannon = 2,   // Double damage, faster bullets, evil sound
   ScatterShot = 3,   // Fire 3 bullets in a spread
   WideBore = 4,      // Dig 9x9 tunnels instead of 5x5
+  ShieldRegen = 5,   // Slow passive shield regen outside base
 }
 
 /** Numpad-style direction encoding: 5 = stationary */
@@ -93,7 +94,8 @@ export interface GameState {
   dirtyTiles: Set<number>; // indices of tiles changed since last frame
   particles: ExplosionParticle[];
   outpost: Base;
-  outpostClaimed: boolean[];
+  bonusPickup: BonusPickup | null;
+  bonusSpawnTimer: number;
 }
 
 export interface Effect {
@@ -111,6 +113,12 @@ export interface ExplosionParticle {
   dy: number;
   life: number; // ticks remaining
   color: number; // CGA palette index
+}
+
+export interface BonusPickup {
+  x: number;
+  y: number;
+  type: BonusType;
 }
 
 /** Common rendering context type that works for both regular and offscreen canvas */
