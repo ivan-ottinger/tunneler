@@ -2,7 +2,7 @@ import { createNoise2D } from 'simplex-noise';
 import { GameState, Effect, TileType } from '../types.js';
 import {
   RENDER_SCALE, VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
-  STATUS_PANEL_WIDTH, CANVAS_WIDTH, CANVAS_HEIGHT,
+  CANVAS_WIDTH, CANVAS_HEIGHT,
   TILE_COLORS, PLAYER_COLORS, PLAYER_DARK_COLORS, TANK_SIZE,
   CGA_PALETTE, BASE_SIZE, BASE_ENTRANCE_WIDTH, BASE_CAMP_TIMEOUT,
   RESPAWN_TICKS, OUTPOST_COLOR,
@@ -299,7 +299,7 @@ export class Renderer {
 
     // Draw player viewports
     for (let p = 0; p < 2; p++) {
-      const viewX = p === 0 ? 0 : VIEWPORT_WIDTH + STATUS_PANEL_WIDTH;
+      const viewX = p === 0 ? 0 : VIEWPORT_WIDTH;
       const vp = state.viewports[p];
 
       // Apply screen shake as random offset
@@ -417,7 +417,11 @@ export class Renderer {
       );
     }
 
-    // Draw status panel
+    // Draw viewport divider
+    ctx.fillStyle = CGA_PALETTE[8];
+    ctx.fillRect(VIEWPORT_WIDTH, 0, 1, VIEWPORT_HEIGHT);
+
+    // Draw status panel (bottom HUD)
     drawStatusPanel(ctx, state);
 
     // Tick effects
