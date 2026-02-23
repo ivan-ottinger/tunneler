@@ -1,11 +1,11 @@
 import { createNoise2D } from 'simplex-noise';
-import { GameState, Effect, TileType } from '../types.js';
+import { BonusType, GameState, Effect, TileType } from '../types.js';
 import {
   RENDER_SCALE, VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
   CANVAS_WIDTH, CANVAS_HEIGHT,
   TILE_COLORS, PLAYER_COLORS, PLAYER_DARK_COLORS, TANK_SIZE,
   CGA_PALETTE, BASE_SIZE, BASE_ENTRANCE_WIDTH, BASE_CAMP_TIMEOUT,
-  RESPAWN_TICKS, OUTPOST_COLOR,
+  RESPAWN_TICKS, OUTPOST_COLOR, BONUS_PICKUP_SIZE,
   DIRT_PALETTE, DIRT_VARIANT_PALETTE,
   DIRT_PALETTE_EDGE, DIRT_VARIANT_PALETTE_EDGE,
 } from '../constants.js';
@@ -14,6 +14,14 @@ import { calculateViewport } from './ViewportCalculator.js';
 import { drawStatusPanel } from './StatusPanel.js';
 import { getTankSprite } from './TankSprites.js';
 import { drawStaticInterference, drawEffects } from './EffectsRenderer.js';
+
+const BONUS_COLORS: Record<number, string> = {
+  [BonusType.SpeedDig]: CGA_PALETTE[10],     // Light Green
+  [BonusType.PowerCannon]: CGA_PALETTE[12],  // Light Red
+  [BonusType.ScatterShot]: CGA_PALETTE[14],  // Yellow
+  [BonusType.WideBore]: CGA_PALETTE[11],     // Light Cyan
+  [BonusType.ShieldRegen]: CGA_PALETTE[13], // Light Magenta
+};
 
 export class Renderer {
   private offscreen: OffscreenCanvas;
@@ -267,6 +275,16 @@ export class Renderer {
       displayCtx.fillRect(tx, ty, ts, ts);
     }
 
+    // Draw bonus pickup on map overview
+    if (state.bonusPickup) {
+      const bp = state.bonusPickup;
+      const bpx = offsetX + bp.x * scale;
+      const bpy = offsetY + bp.y * scale;
+      const bps = Math.max(3, Math.ceil(BONUS_PICKUP_SIZE * scale));
+      displayCtx.fillStyle = BONUS_COLORS[bp.type] ?? CGA_PALETTE[15];
+      displayCtx.fillRect(bpx, bpy, bps, bps);
+    }
+
     // Draw particles on map overview
     const ps = Math.max(1, Math.ceil(scale));
     for (const particle of state.particles) {
@@ -389,6 +407,37 @@ export class Renderer {
               by >= 0 && by < VIEWPORT_HEIGHT) {
             ctx.fillRect(bx, by, 1, 1);
           }
+        }
+      }
+
+      // Draw bonus pickup
+      if (state.bonusPickup) {
+        const bp = state.bonusPickup;
+        const bpx = bp.x - vp.scrollX + viewX;
+        const bpy = bp.y - vp.scrollY;
+        if (bpx + BONUS_PICKUP_SIZE > viewX && bpx < viewX + VIEWPORT_WIDTH &&
+            bpy + BONUS_PICKUP_SIZE > 0 && bpy < VIEWPORT_HEIGHT) {
+          const pulse = 0.5 + 0.5 * Math.sin(state.tickCount * 0.3);
+          ctx.globalAlpha = 0.6 + 0.4 * pulse;
+          ctx.fillStyle = BONUS_COLORS[bp.type] ?? CGA_PALETTE[15];
+          for (let dy = 0; dy < BONUS_PICKUP_SIZE; dy++) {
+            for (let dx = 0; dx < BONUS_PICKUP_SIZE; dx++) {
+              const px = bpx + dx;
+              const py = bpy + dy;
+              if (px < viewX || px >= viewX + VIEWPORT_WIDTH) continue;
+              if (py < 0 || py >= VIEWPORT_HEIGHT) continue;
+              ctx.fillRect(px, py, 1, 1);
+            }
+          }
+          // White center pixel
+          const centerX = bpx + Math.floor(BONUS_PICKUP_SIZE / 2);
+          const centerY = bpy + Math.floor(BONUS_PICKUP_SIZE / 2);
+          if (centerX >= viewX && centerX < viewX + VIEWPORT_WIDTH &&
+              centerY >= 0 && centerY < VIEWPORT_HEIGHT) {
+            ctx.fillStyle = CGA_PALETTE[15];
+            ctx.fillRect(centerX, centerY, 1, 1);
+          }
+          ctx.globalAlpha = 1;
         }
       }
 

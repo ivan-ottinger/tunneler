@@ -92,20 +92,22 @@ export function drawStatusPanel(
     const shieldY = energyY + barH + 1;
     drawBar(ctx, barX, shieldY, barW, barH, player.shield, MAX_SHIELD, CGA_PALETTE[12], CGA_PALETTE[7]);
 
-    // Bonus indicator below label (human players only)
-    if (!player.isAI && player.bonus !== BonusType.None) {
+    // Bonus indicator below label
+    if (player.bonus !== BonusType.None) {
       const bonusY = hudY + 9;
       const bonusLabels: Record<number, string> = {
         [BonusType.SpeedDig]: 'DIG',
         [BonusType.PowerCannon]: 'PWR',
         [BonusType.ScatterShot]: 'SCT',
         [BonusType.WideBore]: 'WDE',
+        [BonusType.ShieldRegen]: 'SHD',
       };
       const bonusColors: Record<number, string> = {
         [BonusType.SpeedDig]: CGA_PALETTE[10],
         [BonusType.PowerCannon]: CGA_PALETTE[12],
         [BonusType.ScatterShot]: CGA_PALETTE[14],
         [BonusType.WideBore]: CGA_PALETTE[11],
+        [BonusType.ShieldRegen]: CGA_PALETTE[13],
       };
       drawBitmapText(ctx, bonusLabels[player.bonus] ?? '', labelX, bonusY, bonusColors[player.bonus] ?? CGA_PALETTE[15], 1);
     }

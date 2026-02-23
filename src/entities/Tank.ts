@@ -4,7 +4,7 @@ import {
   MAX_ENERGY, MAX_SHIELD,
   BASE_SIZE, BASE_ENERGY_REGEN, BASE_SHIELD_REGEN,
   ENEMY_BASE_ENERGY_REGEN, BASE_CAMP_TIMEOUT, INVULN_TICKS,
-  OUTPOST_ENERGY_REGEN, OUTPOST_SHIELD_REGEN,
+  OUTPOST_ENERGY_REGEN, OUTPOST_SHIELD_REGEN, SHIELD_REGEN_RATE,
   DIG_COOLDOWN_TICKS, DIG_COOLDOWN_FIRING, WIDE_BORE_DIG_SIZE,
   EXPLOSION_PARTICLE_COUNT,
   EXPLOSION_PARTICLE_SPEED_MIN, EXPLOSION_PARTICLE_SPEED_MAX,
@@ -193,12 +193,6 @@ function handleRefueling(
       player.shield = Math.min(MAX_SHIELD, player.shield + OUTPOST_SHIELD_REGEN);
     }
 
-    // One-time power-up on first visit regardless of owner
-    if (!state.outpostClaimed[playerIndex]) {
-      state.outpostClaimed[playerIndex] = true;
-      player.bonus = Math.random() < 0.5 ? BonusType.SpeedDig : BonusType.PowerCannon;
-      sound.playPowerUp();
-    }
   }
 }
 
@@ -239,6 +233,11 @@ function handleIdleDrain(
       player.score = Math.max(0, player.score - 1);
       destroyTank(state, player, sound);
     }
+  }
+
+  // Shield regen bonus — slow passive regen anywhere
+  if (player.bonus === BonusType.ShieldRegen) {
+    player.shield = Math.min(MAX_SHIELD, player.shield + SHIELD_REGEN_RATE);
   }
 }
 
@@ -301,5 +300,6 @@ function respawnTank(player: Player): void {
   player.digCooldown = 0;
   player.baseCampTicks = 0;
   player.invulnTicks = INVULN_TICKS;
+  player.bonus = BonusType.None;
   player.bullets = [];
 }

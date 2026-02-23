@@ -351,7 +351,7 @@ export class AIController {
       this.recalcPath(gameState, cx, cy, nearestIdx);
       this.waypointBestDist = Infinity;
       this.waypointStallTicks = 0;
-      this.wallSide = 0;
+      if (stateChanged) this.wallSide = 0; // preserve wall-follow during periodic recalc
       this.entranceTarget = null; // allow fresh entrance selection for new path
       this.exitTarget = null;
     }
@@ -486,8 +486,12 @@ export class AIController {
     // When inside a base, use entrance-aware navigation to avoid getting stuck on walls
     // Exceptions: stay put when retreating to own base (recharging),
     //             or move toward target when chasing inside enemy base
+    //             or transiting through an enemy base during chase/patrol (path leads out naturally)
+    //             (own base still uses exit navigation to thread through entrances)
     // Also continue exit navigation during boundary flicker (briefly detected as outside)
-    const shouldExitBase = insideAnyBase && !(inOwnBase && this.state === AIState.Retreat) && !targetInSameBase;
+    const shouldExitBase = insideAnyBase && !(inOwnBase && this.state === AIState.Retreat) && !targetInSameBase
+      && this.state !== AIState.Chase
+      && !(this.state === AIState.Patrol && this.path.length > 0 && !inOwnBase);
     if (shouldExitBase || (!insideAnyBase && this.exitTarget)) {
       // Invalidate stale exit target from a different base
       if (this.exitTarget && insideAnyBase) {
@@ -1039,15 +1043,23 @@ export class AIController {
           const half = Math.floor(BASE_SIZE / 2);
           const candidates: { x: number; y: number }[] = [];
 
-          // Include discovered enemy bases as candidates (creates pressure)
+          // Include nearest entrance of discovered enemy bases (creates pressure)
+          // Skip if AI is already at the entrance (avoids re-ambushing the same spot)
           for (let i = 0; i < gameState.players.length; i++) {
             if (i === AI_PLAYER_INDEX) continue;
             if (!this.discoveredBases.has(i)) continue; // fog of war
-            const p = gameState.players[i];
-            candidates.push({
-              x: p.base.x + half + Math.floor(Math.random() * 40 - 20),
-              y: p.base.y + half + Math.floor(Math.random() * 40 - 20),
-            });
+            const entrances = getBaseEntrances(gameState.players[i].base.x, gameState.players[i].base.y);
+            let nearest = entrances[0];
+            let nearestDist = Infinity;
+            for (const e of entrances) {
+              const edx = e.x - cx;
+              const edy = e.y - cy;
+              const d = edx * edx + edy * edy;
+              if (d < nearestDist) { nearestDist = d; nearest = e; }
+            }
+            if (nearestDist > 20 * 20) {
+              candidates.push(nearest);
+            }
           }
 
           // Include last-known enemy positions (fade after 300 ticks / ~30 seconds)
@@ -1055,6 +1067,14 @@ export class AIController {
             if (idx === AI_PLAYER_INDEX) continue;
             if (gameState.tickCount - seen.tick > 300) continue; // stale — ignore
             candidates.push({ x: seen.x, y: seen.y });
+          }
+
+          // Include bonus pickup location if AI has no bonus
+          if (ai.bonus === 0 && gameState.bonusPickup) {
+            candidates.push({
+              x: gameState.bonusPickup.x + 1,
+              y: gameState.bonusPickup.y + 1,
+            });
           }
 
           // Add random points — more when no bases discovered yet (pure exploration)
@@ -1066,10 +1086,22 @@ export class AIController {
             });
           }
 
+          // Reject candidates inside any base (causes enter/exit oscillation)
+          const validCandidates = candidates.filter(c => {
+            for (let i = 0; i < gameState.players.length; i++) {
+              const b = gameState.players[i].base;
+              if (c.x >= b.x && c.x < b.x + BASE_SIZE && c.y >= b.y && c.y < b.y + BASE_SIZE) return false;
+            }
+            const o = gameState.outpost;
+            if (c.x >= o.x && c.x < o.x + BASE_SIZE && c.y >= o.y && c.y < o.y + BASE_SIZE) return false;
+            return true;
+          });
+
           // Pick the candidate with the lowest path cost (most tunnel reuse)
+          const pool = validCandidates.length > 0 ? validCandidates : candidates;
           let bestCost = Infinity;
-          let bestCandidate = candidates[0];
-          for (const c of candidates) {
+          let bestCandidate = pool[0];
+          for (const c of pool) {
             const cost = this.pathfinder.pathCost(cx, cy, c.x, c.y);
             if (cost < bestCost) {
               bestCost = cost;
