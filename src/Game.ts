@@ -107,6 +107,11 @@ export class Game {
       bullets: [],
       base: { x: 0, y: 0, owner: index },
       isAI,
+      tilesDug: 0,
+      shotsFired: 0,
+      shotsHit: 0,
+      bonusesCollected: 0,
+      deaths: 0,
     };
   }
 

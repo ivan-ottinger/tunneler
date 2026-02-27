@@ -74,6 +74,11 @@ export interface Player {
   bullets: Bullet[];
   base: Base;
   isAI: boolean;
+  tilesDug: number;
+  shotsFired: number;
+  shotsHit: number;
+  bonusesCollected: number;
+  deaths: number;
 }
 
 export interface Viewport {

@@ -1,11 +1,12 @@
 import { TileType } from '../types.js';
 import { createRng } from './sfc32.js';
 
-/** Set a rectangular area to Empty */
+/** Set a rectangular area to Empty. Returns number of dirt tiles converted. */
 export function digRect(
   map: Uint8Array, mapWidth: number,
   x: number, y: number, w: number, h: number,
-): void {
+): number {
+  let count = 0;
   for (let dy = 0; dy < h; dy++) {
     for (let dx = 0; dx < w; dx++) {
       const mx = x + dx;
@@ -14,9 +15,11 @@ export function digRect(
       const tile = map[idx];
       if (tile === TileType.Dirt || tile === TileType.DirtVariant) {
         map[idx] = TileType.Empty;
+        count++;
       }
     }
   }
+  return count;
 }
 
 /** Dig a probabilistic circular crater. */

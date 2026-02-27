@@ -100,6 +100,7 @@ export function checkBonusPickup(state: GameState, sound: SoundManager): void {
       pickup.x, pickup.y, BONUS_PICKUP_SIZE, BONUS_PICKUP_SIZE,
     )) {
       player.bonus = pickup.type;
+      player.bonusesCollected++;
       sound.playPowerUp();
       state.bonusPickup = null;
       state.bonusSpawnTimer = BONUS_RESPAWN_DELAY_MIN +
