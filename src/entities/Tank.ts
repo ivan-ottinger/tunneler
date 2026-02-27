@@ -107,7 +107,7 @@ function handleMovement(
 
     // Mark old position dirty before digging
     markDirtyRect(state.dirtyTiles, state.mapWidth, player.x, player.y, TANK_SIZE, TANK_SIZE);
-    digRect(state.map, state.mapWidth, newX - digOffset, newY - digOffset, digSize, digSize);
+    player.tilesDug += digRect(state.map, state.mapWidth, newX - digOffset, newY - digOffset, digSize, digSize);
     markDirtyRect(state.dirtyTiles, state.mapWidth, newX - digOffset, newY - digOffset, digSize, digSize);
     sound.playDig();
   } else {
@@ -115,7 +115,7 @@ function handleMovement(
     markDirtyRect(state.dirtyTiles, state.mapWidth, player.x, player.y, TANK_SIZE, TANK_SIZE);
     // Wide Bore also widens existing tunnels when moving through empty space
     if (isWideBore) {
-      digRect(state.map, state.mapWidth, newX - digOffset, newY - digOffset, digSize, digSize);
+      player.tilesDug += digRect(state.map, state.mapWidth, newX - digOffset, newY - digOffset, digSize, digSize);
       markDirtyRect(state.dirtyTiles, state.mapWidth, newX - digOffset, newY - digOffset, digSize, digSize);
     }
   }
@@ -252,6 +252,7 @@ function handleRespawn(state: GameState, playerIndex: number): void {
 
 export function destroyTank(state: GameState, player: Player, sound?: SoundManager): void {
   player.alive = false;
+  player.deaths++;
   player.respawnTimer = 30;
   player.bullets = [];
   if (sound) sound.playExplosion();

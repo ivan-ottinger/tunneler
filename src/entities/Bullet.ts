@@ -78,6 +78,7 @@ export function handleFiring(
     });
   }
 
+  player.shotsFired += player.bonus === BonusType.ScatterShot ? 3 : 1;
   renderer.addEffect({ x: tipX, y: tipY, type: 'muzzleFlash', framesLeft: 2, owner: playerIndex });
   if (player.bonus === BonusType.PowerCannon) {
     sound.playEvilShoot();
@@ -176,6 +177,7 @@ export function updateBullets(state: GameState, renderer: Renderer, sound: Sound
             );
             alive = false;
             hitOpponent = true;
+            player.shotsHit++;
 
             if (opponent.shield <= 0) {
               player.score++;
